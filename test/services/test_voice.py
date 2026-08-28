@@ -54,9 +54,9 @@ class TestVoiceService(unittest.TestCase):
 
     def test_get_all_azure_voices(self):
         voices = vs.get_all_azure_voices()
-        # 数据已从内联字符串迁移到 azure_voices.json，确保仍能完整加载
+        # Данные перенесены из встроенной строки в azure_voices.json — убеждаемся, что они по-прежнему загружаются полностью
         self.assertEqual(len(voices), 331)
-        # 结果应为 "Name-Gender" 格式且已排序
+        # Результат должен быть в формате "Name-Gender" и отсортирован
         self.assertEqual(voices, sorted(voices))
         for v in voices:
             self.assertTrue(v.endswith("-Male") or v.endswith("-Female"))
@@ -97,9 +97,10 @@ class TestVoiceService(unittest.TestCase):
 
     def test_no_voice_tts_generates_silent_audio_and_subtitle_timeline(self):
         """
-        无配音模式不调用任何外部 TTS provider，只生成静音音频作为时间轴占位。
-        这里 mock FFmpeg，验证请求参数、输出文件和 legacy 字幕结构都符合后续
-        视频合成链路的预期。
+        Режим без озвучки не вызывает внешних TTS-провайдеров и лишь создаёт
+        беззвучное аудио как заглушку таймлайна. Здесь FFmpeg замокан: проверяем,
+        что параметры запроса, выходной файл и legacy-структура субтитров
+        соответствуют ожиданиям дальнейшей цепочки сборки видео.
         """
 
         def fake_run(command, capture_output, text, check):
@@ -130,9 +131,10 @@ class TestVoiceService(unittest.TestCase):
 
     def test_get_audio_duration_accepts_non_mp3_files(self):
         """
-        自定义音频（custom_audio_file）常见为 m4a/wav/aac 等非 mp3 格式。
-        get_audio_duration 不应因扩展名不是 .mp3 就报 "Invalid target type" 并返回 0，
-        而应交给 moviepy(ffmpeg) 读取真实时长。
+        Пользовательское аудио (custom_audio_file) часто бывает в форматах m4a,
+        wav, aac, а не mp3. get_audio_duration не должен из-за расширения,
+        отличного от .mp3, сообщать "Invalid target type" и возвращать 0 —
+        реальную длительность обязан прочитать moviepy через ffmpeg.
         """
         for path in ("custom-audio.m4a", "voice.wav", "clip.aac"):
             with patch.object(vs.os.path, "exists", return_value=True), \
@@ -142,14 +144,16 @@ class TestVoiceService(unittest.TestCase):
                 mock_afc.assert_called_once_with(path)
 
     def test_get_audio_duration_missing_file_returns_zero(self):
-        """音频文件不存在时安全返回 0，而不是抛异常或读取失败。"""
+        """Когда аудиофайла нет, безопасно возвращается 0, а не исключение или ошибка чтения."""
         with patch.object(vs.os.path, "exists", return_value=False):
             self.assertEqual(vs.get_audio_duration("does-not-exist.m4a"), 0.0)
 
     def test_no_voice_alias_none_is_supported_temporarily(self):
         """
-        兼容 PR #981 曾使用过的 none sentinel，避免少量直接调用 API 的用户
-        升级后立即失效。新 UI 和新代码仍统一使用 no-voice。
+        Совместимость с sentinel-значением none из PR #981, чтобы у небольшого
+        числа пользователей, вызывающих API напрямую, всё не отвалилось сразу
+        после обновления. Новый интерфейс и новый код единообразно используют
+        no-voice.
         """
         self.assertTrue(vs.is_no_voice("none"))
         self.assertTrue(vs.is_no_voice(vs.NO_VOICE_NAME))
@@ -157,8 +161,10 @@ class TestVoiceService(unittest.TestCase):
 
     def test_no_voice_duration_estimates_non_ascii_languages(self):
         """
-        无配音没有真实 TTS 音频，只能根据脚本文字估算阅读时间。俄语、阿拉伯语、
-        日文假名、韩文等非 ASCII 文本也必须参与估算，不能都落到最短 3 秒。
+        Без озвучки настоящего аудио от TTS нет, и время чтения приходится
+        оценивать по тексту сценария. Русский, арабский, японская кана, корейский
+        и другой не-ASCII текст тоже обязаны участвовать в оценке, а не сводиться
+        к минимальным 3 секундам.
         """
         russian_text = (
             "Это длинный тестовый сценарий без озвучки. "
@@ -171,8 +177,9 @@ class TestVoiceService(unittest.TestCase):
 
     def test_generate_silent_audio_rejects_missing_output_file(self):
         """
-        即使 FFmpeg 进程返回成功，也要确认输出文件真实存在且非空。这样可以把
-        异常收敛在 TTS 阶段，而不是拖到后续视频合成阶段才暴露。
+        Даже когда процесс FFmpeg вернул успех, нужно убедиться, что выходной файл
+        действительно существует и не пуст. Так сбой локализуется на этапе TTS, а
+        не всплывает позже, на этапе сборки видео.
         """
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
             vs.utils,
@@ -189,8 +196,10 @@ class TestVoiceService(unittest.TestCase):
 
     def test_empty_voice_name_does_not_enable_no_voice_mode(self):
         """
-        空 voice 通常意味着配置缺失或接口参数错误，不能自动切到无配音模式。
-        否则用户填错 TTS 配置时也会得到一个“成功”的静音视频，定位成本更高。
+        Пустой voice обычно означает отсутствующую настройку или ошибку в
+        параметрах эндпоинта, и переключаться на режим без озвучки автоматически
+        нельзя. Иначе пользователь с неверной конфигурацией TTS получит
+        «успешное» беззвучное видео, и разбираться будет заметно дороже.
         """
         sentinel = object()
 
@@ -210,9 +219,9 @@ class TestVoiceService(unittest.TestCase):
         "MPT_RUN_INTEGRATION_TESTS not set",
     )
     def test_siliconflow(self):
-        # SiliconFlow 的 API Key 存在 [siliconflow].api_key 中，运行时代码也是从
-        # config.siliconflow 读取；这里必须使用同一配置源，避免正确配置凭据时
-        # 测试仍然被误跳过。
+        # API-ключ SiliconFlow лежит в [siliconflow].api_key, и рабочий код тоже читает
+        # его из config.siliconflow; здесь обязателен тот же источник конфигурации, иначе
+        # при корректно настроенных учётных данных тест всё равно будет пропускаться.
         if not vs.config.siliconflow.get("api_key"):
             self.skipTest("siliconflow_api_key is not configured")
 
@@ -223,10 +232,10 @@ class TestVoiceService(unittest.TestCase):
             parts = voice_name.split(":")
             if len(parts) >= 3:
                 model = parts[1]
-                # 移除性别后缀，例如 "alex-Male" -> "alex"
+                # Убираем суффикс пола, например "alex-Male" -> "alex"
                 voice_with_gender = parts[2]
                 voice = voice_with_gender.split("-")[0]
-                # 构建完整的voice参数，格式为 "model:voice"
+                # Собираем полный параметр voice в формате "model:voice"
                 full_voice = f"{model}:{voice}"
                 voice_file = f"{temp_dir}/tts-siliconflow-{voice}.mp3"
                 subtitle_file = f"{temp_dir}/tts-siliconflow-{voice}.srt"
@@ -265,12 +274,14 @@ class TestVoiceService(unittest.TestCase):
 
     def test_azure_tts_v1_supports_legacy_edge_tts_without_boundary(self):
         """
-        验证 Azure TTS V1 在旧版 edge_tts 依赖残留时仍可继续工作。
+        Проверяет, что Azure TTS V1 продолжает работать, когда осталась старая
+        зависимость edge_tts.
 
-        这个回归场景对应 Windows 便携包更新失败后，现场环境还停留在旧版
-        edge_tts 的情况：
-        1. `Communicate.__init__()` 不接受 `boundary`
-        2. 只有异步 `stream()`，没有 `stream_sync()`
+        Регрессионный сценарий соответствует ситуации, когда обновление
+        переносимой сборки для Windows не удалось и на месте осталась старая
+        версия edge_tts:
+        1. `Communicate.__init__()` не принимает `boundary`
+        2. есть только асинхронный `stream()`, без `stream_sync()`
         """
 
         class _LegacyCommunicate:
@@ -318,12 +329,14 @@ class TestVoiceService(unittest.TestCase):
 
     def test_azure_tts_v1_times_out_hanging_stream_sync(self):
         """
-        验证 Azure TTS V1 在 edge_tts 同步流卡住时能够快速失败。
+        Проверяет, что Azure TTS V1 быстро падает, когда синхронный поток edge_tts
+        зависает.
 
-        真实现场里，网络异常、服务端限流、voice 语言与文本不匹配时，
-        `stream_sync()` 可能长时间不返回，导致 WebUI 任务只停在
-        `start, voice name...`。这里用阻塞的 fake stream 复现该场景，
-        确认超时保护会让函数结束并返回 None。
+        На практике при сетевом сбое, ограничении на стороне сервиса или
+        несовпадении языка голоса с текстом `stream_sync()` может подолгу не
+        возвращаться, и задача WebUI застревает на `start, voice name...`.
+        Воспроизводим это блокирующим фиктивным потоком и убеждаемся, что защита
+        по таймауту завершает функцию с возвратом None.
         """
 
         class _HangingCommunicate:
@@ -395,7 +408,7 @@ class TestVoiceService(unittest.TestCase):
         self.loop.run_until_complete(_do())
 
     def test_azure_tts_v2_ssml_applies_rate_and_escapes_text(self):
-        """Azure V2 必须通过 SSML 应用语速，并避免用户文案破坏 XML。"""
+        """Azure V2 обязан применять скорость речи через SSML и не давать пользовательскому тексту сломать XML."""
         ssml = vs._build_azure_v2_ssml(
             text='A < B & "quoted"',
             voice_name="zh-CN-XiaoxiaoMultilingualNeural",
@@ -407,7 +420,7 @@ class TestVoiceService(unittest.TestCase):
         self.assertIn("A &lt; B &amp; \"quoted\"", ssml)
 
     def test_tts_forwards_rate_to_azure_v2(self):
-        """统一 TTS 入口不能在分发 Azure V2 时丢失 voice_rate。"""
+        """Единая точка входа TTS не должна терять voice_rate при диспетчеризации в Azure V2."""
         voice_name = "zh-CN-XiaoxiaoMultilingualNeural-V2-Female"
         with patch.object(vs, "azure_tts_v2", return_value=object()) as mock_tts:
             result = vs.tts(
@@ -426,7 +439,7 @@ class TestVoiceService(unittest.TestCase):
         )
 
     def test_tts_strips_gemini_style_metadata_before_dispatch(self):
-        """Gemini 下拉框的官方风格描述不能成为 API voice_name 的一部分。"""
+        """Официальное описание стиля из выпадающего списка Gemini не должно попадать в voice_name для API."""
         sentinel = object()
 
         with patch.object(vs, "gemini_tts", return_value=sentinel) as gemini_tts:
@@ -449,10 +462,12 @@ class TestVoiceService(unittest.TestCase):
 
     def test_gemini_tts_uses_google_genai_and_compatible_submaker_fields(self):
         """
-        验证 Gemini TTS 在 edge_tts 7.x 环境下仍会返回项目兼容的字幕结构，
-        并且可以被 `subtitle_provider=edge` 的字幕生成链路直接消费，
-        避免再次回退 Whisper。同时使用不存在的嵌套输出目录，覆盖 API 或
-        CLI 直接调用服务时没有提前创建任务目录的边界情况。
+        Проверяет, что Gemini TTS в окружении edge_tts 7.x по-прежнему возвращает
+        совместимую с проектом структуру субтитров и её напрямую потребляет
+        цепочка генерации субтитров при `subtitle_provider=edge`, без повторного
+        отката к Whisper. Заодно используется несуществующий вложенный выходной
+        каталог — это покрывает граничный случай, когда API или CLI вызывают
+        сервис напрямую и каталог задачи заранее не создан.
         """
 
         class _InlineData:
@@ -547,11 +562,13 @@ class TestVoiceService(unittest.TestCase):
 
     def test_mimo_tts_uses_openai_compatible_audio_response(self):
         """
-        验证 Xiaomi MiMo TTS 可以消费 OpenAI-compatible 的音频响应结构。
+        Проверяет, что Xiaomi MiMo TTS умеет потреблять OpenAI-совместимую
+        структуру аудиоответа.
 
-        这里用 fake OpenAI client 和 fake AudioSegment 覆盖真实网络与 ffmpeg，
-        确认运行时代码会把待合成文本放到 assistant message，并把返回的
-        base64 WAV 音频导出到项目后续流程使用的音频文件。
+        Реальные сеть и ffmpeg заменены фиктивными клиентом OpenAI и AudioSegment:
+        убеждаемся, что рабочий код кладёт текст для синтеза в сообщение assistant
+        и экспортирует возвращённое base64-аудио WAV в аудиофайл, который
+        использует дальнейший процесс проекта.
         """
 
         class _FakeAudio:
@@ -679,7 +696,7 @@ class TestVoiceService(unittest.TestCase):
         self.assertEqual(captured["json"]["audio_setting"]["format"], "mp3")
 
     def test_minimax_tts_reuses_cn_llm_key_and_endpoint(self):
-        """TTS 未单独配置时，应复用同区域的 MiniMax LLM 凭证和地址。"""
+        """Когда TTS не настроен отдельно, переиспользуются учётные данные и адрес MiniMax LLM того же региона."""
         class _Response:
             status_code, text = 200, ""
 
@@ -720,7 +737,7 @@ class TestVoiceService(unittest.TestCase):
         self.assertEqual(captured["headers"]["Authorization"], "Bearer shared-cn-key")
 
     def test_get_minimax_voice_catalog_normalizes_all_voice_types(self):
-        """音色查询应统一不同来源的响应结构，并忽略重复或空 Voice ID。"""
+        """Запрос голосов обязан сводить к общему виду структуры ответа из разных источников и игнорировать повторяющиеся и пустые Voice ID."""
 
         class _Response:
             status_code, text = 200, ""
@@ -777,7 +794,7 @@ class TestVoiceService(unittest.TestCase):
         )
 
     def test_get_minimax_voice_catalog_exposes_provider_error(self):
-        """远端业务错误应明确抛出，不能被伪装成账号没有可用音色。"""
+        """Бизнес-ошибка удалённой стороны обязана явно пробрасываться, а не выдаваться за отсутствие доступных голосов у аккаунта."""
 
         class _Response:
             status_code, text = 200, ""
@@ -796,7 +813,7 @@ class TestVoiceService(unittest.TestCase):
                 vs.get_minimax_voice_catalog(api_key="invalid-key")
 
     def test_minimax_tts_does_not_leave_invalid_audio_output(self):
-        """响应音频无法解析时，不应覆盖已有文件或留下临时文件。"""
+        """Когда аудио из ответа не разбирается, существующий файл не перезаписывается и временных файлов не остаётся."""
         class _Response:
             status_code, text = 200, ""
 
@@ -1058,8 +1075,9 @@ class TestVoiceService(unittest.TestCase):
 
     def test_generate_subtitle_keeps_edge_provider_for_gemini_legacy_submaker(self):
         """
-        验证 Gemini TTS 返回的 legacy 字幕结构在 edge provider 下可以直接产出
-        SRT，不会因为匹配失败而回退到 Whisper。
+        Проверяет, что legacy-структура субтитров, возвращаемая Gemini TTS, у
+        провайдера edge напрямую даёт SRT и не откатывается к Whisper из-за
+        неудачного сопоставления.
         """
         script = "Gemini subtitle generation should work now. Testing multiple lines."
         sub_maker = vs.populate_legacy_submaker_with_full_text(
@@ -1095,9 +1113,11 @@ class TestVoiceService(unittest.TestCase):
 
     def test_script_split_keeps_thousand_separator_comma(self):
         """
-        Edge TTS 会把 "1,000 years" 作为连续文本返回。脚本断句时不能把
-        数字中间的英文逗号当成句子边界，否则字幕聚合会出现 issue #894
-        里的 sub_items 数量少于 script_lines，并错误回退 Whisper。
+        Edge TTS возвращает "1,000 years" как непрерывный текст. При разбиении
+        сценария на фразы английскую запятую внутри числа нельзя считать границей
+        предложения: иначе при сборке субтитров возникнет описанная в issue #894
+        ситуация, когда sub_items меньше, чем script_lines, и произойдёт ошибочный
+        откат к Whisper.
         """
         text = (
             "It takes about 1,000 years for a single drop of water to finish "
@@ -1116,9 +1136,10 @@ class TestVoiceService(unittest.TestCase):
 
     def test_edge_cue_aggregation_handles_thousand_separator_comma(self):
         """
-        复现 issue #894 的关键形态：Edge cues 中最后一句作为连续文本返回，
-        包含 `1,000 years`。脚本断句必须与 cues 聚合结果一致，不能把它
-        拆成两条字幕。
+        Воспроизводит ключевую форму issue #894: последняя фраза в cues от Edge
+        возвращается непрерывным текстом и содержит `1,000 years`. Разбиение
+        сценария обязано совпасть с результатом сборки cues и не разделить её на
+        два субтитра.
         """
         text = (
             "The ocean isn't just sitting stil, it moves around the world like a massive "
@@ -1131,8 +1152,8 @@ class TestVoiceService(unittest.TestCase):
         script_lines = utils.split_string_by_punctuations(text)
         cues = []
         for index, line in enumerate(script_lines):
-            # Edge 的 cue content 经常没有脚本里的空格和标点布局，这里去掉空格
-            # 来模拟更严格的匹配场景。
+            # В содержимом cue от Edge часто нет пробелов и расстановки знаков из сценария,
+            # поэтому здесь убираем пробелы, моделируя более строгий сценарий сопоставления.
             cues.append(
                 SimpleNamespace(
                     content=line.replace(" ", ""),
@@ -1149,8 +1170,9 @@ class TestVoiceService(unittest.TestCase):
 
     def test_script_split_supports_arabic_punctuation(self):
         """
-        阿拉伯语脚本常用 ، ؛ ؟ 作为自然断句标点。断句阶段必须识别这些
-        标点，否则 edge-tts cue 的停顿边界和脚本行边界会错位。
+        В арабских сценариях естественными знаками конца фразы служат ، ؛ ؟. Этап
+        разбиения обязан их распознавать, иначе границы пауз в cue от edge-tts и
+        границы строк сценария разойдутся.
         """
         text = "مرحبا بالعالم، كيف حالك؟ هذا اختبار؛ يعمل بشكل جيد."
 
@@ -1166,8 +1188,9 @@ class TestVoiceService(unittest.TestCase):
 
     def test_match_script_line_normalizes_arabic_letter_forms(self):
         """
-        edge-tts 可能把阿拉伯语中的不同字母形态归一化，或返回带变音符号、
-        Tatweel 的 cue 文本。匹配时应容错，但最终字幕仍保留原始脚本文案。
+        edge-tts может нормализовать разные формы арабских букв или вернуть текст
+        cue с диакритикой и Tatweel. Сопоставление обязано это допускать, но в
+        итоговых субтитрах остаётся исходный текст сценария.
         """
         script_lines = ["أهلاً وسهلاً بك في المدرسة"]
 
@@ -1181,8 +1204,9 @@ class TestVoiceService(unittest.TestCase):
 
     def test_edge_cue_aggregation_handles_arabic_variant_forms(self):
         """
-        复现阿拉伯语字幕失败的核心路径：脚本包含 أ/ة 等字母形态，edge cue
-        返回 ا/ه 等归一化形态时，聚合仍应生成完整字幕，避免回退 Whisper。
+        Воспроизводит основной путь сбоя арабских субтитров: в сценарии формы букв
+        вроде أ/ة, а cue от edge возвращает нормализованные ا/ه — сборка всё равно
+        обязана дать полные субтитры и не откатываться к Whisper.
         """
         text = "أهلاً وسهلاً بك في المدرسة؟ هذا اختبار رائع، شكراً لك."
         script_lines = utils.split_string_by_punctuations(text)
@@ -1210,9 +1234,10 @@ class TestVoiceService(unittest.TestCase):
 
     def test_create_subtitle_ignores_markdown_separator_lines(self):
         """
-        用户手动脚本可能包含 `---` 这类 Markdown 分隔符。TTS 不会朗读
-        这些符号行，字幕聚合也不应把它们当成目标字幕行，否则后续真实
-        字幕会卡住并回退到 Whisper。
+        В сценарии, написанном пользователем вручную, могут быть
+        Markdown-разделители вроде `---`. TTS такие строки не произносит, и сборка
+        субтитров не должна принимать их за целевые строки субтитров: иначе
+        настоящие субтитры дальше застрянут и произойдёт откат к Whisper.
         """
         text = "第一段\n---\n第二段"
         sub_maker = SimpleNamespace(
@@ -1247,8 +1272,9 @@ class TestVoiceService(unittest.TestCase):
 
     def test_create_subtitle_ignores_markdown_underscore_marks(self):
         """
-        `_` 常被用户用作 Markdown 强调标记，但 TTS 返回的 cue 通常不包含
-        这些格式符。匹配时应忽略 `_`，避免生成空字幕或回退到 Whisper。
+        `_` пользователи часто используют как Markdown-выделение, но в cue от TTS
+        таких символов форматирования обычно нет. При сопоставлении `_` нужно
+        игнорировать, чтобы не получить пустые субтитры или откат к Whisper.
         """
         text = "这是_a_测试。"
         sub_maker = SimpleNamespace(
@@ -1286,8 +1312,8 @@ class TestVoiceService(unittest.TestCase):
         self.assertEqual(vs.convert_rate_to_percent(0.8), "-20%")
 
     def test_convert_rate_to_percent_invalid_values_default_to_normal(self):
-        # API 和批处理脚本可能把空语速传成 0、None 或空字符串；这些都不应让
-        # edge-tts 收到 -100% 或触发异常，而是按正常语速处理。
+        # API и пакетные скрипты могут передать пустую скорость речи как 0, None или
+        # пустую строку; ни одно из этих значений не должно доходить до edge-tts как -100% или вызывать исключение — их нужно обрабатывать как нормальную скорость.
         self.assertEqual(vs.convert_rate_to_percent(0), "+0%")
         self.assertEqual(vs.convert_rate_to_percent(0.0), "+0%")
         self.assertEqual(vs.convert_rate_to_percent(None), "+0%")
@@ -1372,8 +1398,8 @@ class TestElevenLabsVoice(unittest.TestCase):
     @patch("app.services.voice.config")
     def test_elevenlabs_tts_no_api_key(self, mock_config):
         mock_config.elevenlabs.get.return_value = ""
-        # Key 解析包含环境变量回退，测试必须显式清空宿主环境，避免开发机或 CI
-        # 恰好设置 ELEVENLABS_API_KEY 后改变“未配置”的测试前提。
+        # Разбор ключа включает откат к переменной окружения, поэтому тест обязан явно
+        # очистить окружение хоста: иначе случайно выставленный на машине разработчика или в CI ELEVENLABS_API_KEY изменит предпосылку теста «не настроено».
         with patch.dict(os.environ, {}, clear=True):
             result = vs.elevenlabs_tts("Hello", "abc123", "/tmp/test.mp3")
         self.assertIsNone(result)
@@ -1399,7 +1425,7 @@ class TestElevenLabsVoice(unittest.TestCase):
             self.assertEqual(vs.get_elevenlabs_api_key(), "env-key")
 
     def test_elevenlabs_api_key_matches_music_service(self):
-        """TTS 和配乐共用同一账号配置，两条生成链路必须解析出相同 Key。"""
+        """TTS и музыка используют настройки одного аккаунта, поэтому обе цепочки генерации обязаны получать один и тот же ключ."""
         from app.services import elevenlabs_music
 
         for configured_key, env_key in (("config-key", "env-key"), ("", "env-key")):
