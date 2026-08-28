@@ -17,17 +17,19 @@ if TYPE_CHECKING:
 
 
 DEFAULT_VOICE_NAME = "zh-CN-XiaoxiaoNeural-Female"
-# 对应 webui/Main.py 的 VOICE_MODE_NONE 和 VOICE_MODE_UPLOAD。两端目前没有
-# 共享这些常量，因此在这里保留字面值并注明来源。
+# Соответствует VOICE_MODE_NONE и VOICE_MODE_UPLOAD из webui/Main.py. Общих
+# констант у этих двух сторон пока нет, поэтому здесь оставлены литералы с указанием источника.
 UI_VOICE_MODE_NONE = "none"
-# 字幕位置的内置默认值。VideoParams 也有同名默认值，但它是 Pydantic 字段
-# 默认，只在模块导入时读取一次 config.ui：此时 config.toml 里的非法值会被
-# 直接冻结进模型，既不会校验也无法在测试中替换。CLI 因此自己保存一份，
-# 保证“非法保存值回退到默认值”对命令行始终成立。
+# Встроенное значение позиции субтитров по умолчанию. В VideoParams есть
+# одноимённое умолчание, но это умолчание поля Pydantic: config.ui читается один
+# раз при импорте модуля, и недопустимое значение из config.toml замораживается
+# прямо в модель — без проверки и без возможности подменить в тесте. Поэтому CLI
+# держит собственную копию, чтобы правило «недопустимое сохранённое значение
+# откатывается к умолчанию» всегда работало для командной строки.
 DEFAULT_SUBTITLE_POSITION = "bottom"
 DEFAULT_CUSTOM_POSITION = 70.0
 UI_VOICE_MODE_UPLOAD = "upload"
-# 这两种保存的配音方式都表示不要自动配音。
+# Оба этих сохранённых способа озвучки означают отказ от автоозвучки.
 UI_VOICE_MODES_WITHOUT_TTS = frozenset({UI_VOICE_MODE_NONE, UI_VOICE_MODE_UPLOAD})
 _PIPELINE_STAGES = ("script", "terms", "audio", "subtitle", "materials", "video")
 _CUSTOM_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
@@ -39,7 +41,7 @@ class _CliHelpFormatter(
     argparse.ArgumentDefaultsHelpFormatter,
     argparse.RawDescriptionHelpFormatter,
 ):
-    """在保留多行示例排版的同时，自动展示有意义的默认值。"""
+    """Сохраняет многострочную вёрстку примеров и при этом автоматически показывает осмысленные значения по умолчанию."""
 
     def _get_help_string(self, action):
         help_text = action.help or ""
@@ -101,7 +103,7 @@ def _hex_color(value: str) -> str:
 
 
 def _subtitle_position(value: str) -> str:
-    """校验保存的字幕位置，取值范围与命令行参数保持一致。"""
+    """Проверяет сохранённую позицию субтитров; диапазон значений совпадает с аргументом командной строки."""
     if value not in ("top", "center", "bottom", "custom"):
         raise argparse.ArgumentTypeError(
             f"subtitle-position must be one of: top, center, bottom, custom, got {value!r}"
@@ -110,7 +112,7 @@ def _subtitle_position(value: str) -> str:
 
 
 def _task_id(value: str) -> str:
-    """CLI 自定义任务标识只接受 UUID，避免该值被解释为文件系统路径。"""
+    """Пользовательский идентификатор задачи в CLI принимается только как UUID, чтобы значение не истолковали как путь в файловой системе."""
     try:
         return str(UUID(value.strip()))
     except (AttributeError, ValueError) as exc:
@@ -589,8 +591,8 @@ Batch manifests:
         and args.subtitle_position != "custom"
     ):
         parser.error("--custom-position requires --subtitle-position custom")
-    # 只有显式的 --no-subtitle-enabled 才算冲突。默认值现在是 None，
-    # 保存的关闭状态在 build_video_params 中处理，不应在这里报参数错误。
+    # Конфликтом считается только явный --no-subtitle-enabled. Значение по умолчанию
+    # теперь None, а сохранённое выключенное состояние обрабатывается в build_video_params — сообщать здесь об ошибке аргументов не нужно.
     if (
         not args.batch_file
         and args.stop_at == "subtitle"
@@ -611,23 +613,26 @@ Batch manifests:
 
 def _ui_config_value(ui_config, key: str, expected_type, checker=None):
     """
-    读取 ``[ui]`` 中保存的 WebUI 设置，取不到可用值时返回 ``None``。
+    Читает сохранённые настройки WebUI из ``[ui]``; если пригодного значения нет,
+    возвращает ``None``.
 
-    该配置段也可能被手工编辑，因此这里直接丢弃不可用的条目，让调用方回退到
-    内置默认值，而不是把脏数据继续传下去，触发 traceback 或 ``VideoParams``
-    的校验错误。
+    Эту секцию могли править и вручную, поэтому непригодные записи здесь просто
+    отбрасываются, а вызывающая сторона откатывается к встроенному умолчанию —
+    вместо того чтобы тащить грязные данные дальше и получить traceback или
+    ошибку валидации ``VideoParams``.
 
-    ``checker`` 复用命令行使用的同一批类型函数（如 ``_hex_color``），因此保存
-    值和命令行参数遵循完全相同的取值规则，例如音量不能为负、颜色必须是
-    ``#RRGGBB``。
+    ``checker`` переиспользует те же функции типов, что и командная строка
+    (например, ``_hex_color``), поэтому сохранённые значения и аргументы
+    подчиняются совершенно одинаковым правилам: громкость не может быть
+    отрицательной, цвет обязан быть ``#RRGGBB``.
     """
     value = ui_config.get(key)
     if value is None:
         return None
-    # ``isinstance(True, int)`` 为真，所以在期望数字时必须显式排除 bool。
+    # ``isinstance(True, int)`` истинно, поэтому там, где ожидается число, bool нужно исключать явно.
     if isinstance(value, bool) != (expected_type is bool):
         return None
-    # TOML 中的 ``1`` 是整数，但对音量、语速这类字段同样是合法取值。
+    # ``1`` в TOML — целое число, но для полей вроде громкости и скорости речи это тоже допустимое значение.
     if expected_type is float and isinstance(value, int):
         value = float(value)
     if not isinstance(value, expected_type):
@@ -644,11 +649,14 @@ def _ui_config_value(ui_config, key: str, expected_type, checker=None):
 
 def _resolve_subtitle_enabled(args: argparse.Namespace, ui_config) -> bool:
     """
-    按优先级解析字幕开关：命令行 > WebUI 保存值 > 默认开启。
+    Разбирает переключатель субтитров по приоритету: командная строка > значение,
+    сохранённое в WebUI > включено по умолчанию.
 
-    ``--stop-at subtitle`` 明确要求生成字幕，因此保存的关闭状态不能让该阶段
-    变成空操作；显式的 --no-subtitle-enabled 与该阶段的组合在参数校验中已被
-    拒绝，所以这里只需处理保存值。
+    ``--stop-at subtitle`` прямо требует сгенерировать субтитры, поэтому
+    сохранённое выключенное состояние не должно превращать этот этап в пустую
+    операцию. Сочетание явного --no-subtitle-enabled с этим этапом уже
+    отклоняется при проверке аргументов, так что здесь остаётся обработать только
+    сохранённое значение.
     """
     if args.subtitle_enabled is not None:
         return args.subtitle_enabled
@@ -660,27 +668,30 @@ def _resolve_subtitle_enabled(args: argparse.Namespace, ui_config) -> bool:
 
 def _resolve_voice_name(args: argparse.Namespace, ui_config) -> str:
     """
-    按优先级解析音色：命令行 > WebUI 保存的配音方式和音色 > 内置默认值。
+    Разбирает голос по приоритету: командная строка > сохранённые в WebUI способ
+    озвучки и голос > встроенное умолчание.
 
-    WebUI 把“无配音”保存为独立的 voice_mode，同时保留用户上一次真正选择的
-    音色，以便切回自动配音后恢复。所以这里不能只读 voice_name，否则保存的
-    无配音状态会被忽略，并可能重新触发付费供应商请求。
+    WebUI сохраняет «без озвучки» отдельным voice_mode, попутно оставляя
+    последний реально выбранный пользователем голос, чтобы его можно было вернуть
+    при переключении обратно на автоозвучку. Поэтому читать только voice_name
+    нельзя: сохранённое состояние «без озвучки» было бы проигнорировано и могло
+    бы снова вызвать запрос к платному поставщику.
     """
     from app.services.voice import NO_VOICE_NAME
 
     if args.voice_name:
         return args.voice_name
-    # 无配音和上传自备音频都表示用户不想要自动配音。上传模式的文件路径不会
-    # 写入 [ui]，CLI 无法复现该上传；此时沿用保存的音色会静默触发付费 TTS
-    # 请求，因此两种模式都映射为 no-voice，需要配音时显式传 --voice-name。
+    # И «без озвучки», и загрузка собственного аудио означают, что автоозвучка не
+    # нужна. Путь к файлу при загрузке в [ui] не пишется, и CLI не может повторить
+    # эту загрузку; использование сохранённого голоса молча вызвало бы платный запрос к TTS. Поэтому оба режима отображаются в no-voice, а нужная озвучка задаётся явным --voice-name.
     if _ui_config_value(ui_config, "voice_mode", str) in UI_VOICE_MODES_WITHOUT_TTS:
         return NO_VOICE_NAME
     return _ui_config_value(ui_config, "voice_name", str) or DEFAULT_VOICE_NAME
 
 
 def build_video_params(args: argparse.Namespace) -> VideoParams:
-    # 参数帮助和校验不需要加载应用配置。仅在真正构建任务参数时导入模型，
-    # 避免执行 ``cli.py -h`` 时产生配置初始化日志。
+    # Справке по аргументам и их проверке конфигурация приложения не нужна. Модель
+    # импортируется только при реальной сборке параметров задачи, чтобы ``cli.py -h`` не печатал логи инициализации конфигурации.
     from app.config import config
     from app.models.schema import MaterialInfo, VideoParams
 
@@ -745,8 +756,8 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         if value is not None:
             params_kwargs[name] = value
 
-    # 没有显式传入命令行参数时，使用 WebUI 保存的值。只补充上面尚未由命令行
-    # 设置的字段；若保存值缺失，则继续沿用 VideoParams 的默认值。
+    # Если аргумент командной строки не задан явно, берём значение, сохранённое в
+    # WebUI. Дополняем только поля, которые выше не установила командная строка; при отсутствии сохранённого значения остаётся умолчание VideoParams.
     ui_defaults = (
         ("font_name", str, None),
         ("text_fore_color", str, _hex_color),
@@ -764,7 +775,7 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         if value is not None:
             params_kwargs[name] = value
 
-    # 字幕位置必须由 CLI 给出确定值，不能交给上面说明的导入期字段默认值。
+    # Позицию субтитров CLI обязан задать определённо и не полагаться на описанное выше умолчание поля, вычисляемое при импорте.
     if "subtitle_position" not in params_kwargs:
         params_kwargs["subtitle_position"] = (
             _ui_config_value(ui_config, "subtitle_position", str, _subtitle_position)
@@ -786,8 +797,8 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
     elif args.subtitle_background_color is not None:
         params_kwargs["text_background_color"] = args.subtitle_background_color
     elif args.subtitle_background_enabled is True:
-        # 用户只开启了背景而没有覆盖颜色，因此优先沿用 WebUI 保存的颜色，
-        # 只有在没有可用保存值时才回退到默认背景。
+        # Пользователь только включил фон, не переопределяя цвет, поэтому в первую
+        # очередь берём цвет, сохранённый в WebUI, и лишь при его отсутствии откатываемся к фону по умолчанию.
         params_kwargs["text_background_color"] = (
             _ui_config_value(
                 ui_config, "subtitle_background_color", str, _hex_color
@@ -795,8 +806,8 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
             or True
         )
     else:
-        # “关闭背景”加上颜色作为命令行组合是参数错误；但作为保存的设置，
-        # 同样的组合不应中断运行，只表示禁用背景。
+        # Сочетание «фон выключен» и цвета в командной строке — ошибка аргументов, но
+        # то же сочетание в сохранённых настройках не должно прерывать работу: оно просто означает отключённый фон.
         ui_enabled = _ui_config_value(
             ui_config, "subtitle_background_enabled", bool
         )
@@ -1129,12 +1140,14 @@ def _resolve_cli_file(
     fallback_dir: str | None = None,
 ) -> str:
     """
-    将 CLI 文件参数按当前工作目录解析为绝对路径，
-    并在任务开始前确认存在。
+    Приводит файловые аргументы CLI к абсолютным путям относительно текущего
+    рабочего каталога и проверяет их существование до старта задачи.
 
-    本地素材旧版本始终相对 ``storage/local_videos`` 解析。为兼容已有脚本，
-    当前目录找不到相对路径时允许回退该目录；绝对路径始终按用户输入
-    直接解析。
+    Прежние версии всегда разрешали локальные материалы относительно
+    ``storage/local_videos``. Ради совместимости с существующими скриптами
+    относительный путь, не найденный в текущем каталоге, может откатиться к тому
+    каталогу; абсолютные пути всегда разрешаются ровно так, как их ввёл
+    пользователь.
     """
     expanded_path = os.path.expanduser(raw_path.strip())
     if not expanded_path:
@@ -1160,7 +1173,7 @@ def _path_is_within_directory(file_path: str, directory: str) -> bool:
             [os.path.realpath(directory), os.path.realpath(file_path)]
         ) == os.path.realpath(directory)
     except ValueError:
-        # Windows 不同盘符无法计算 commonpath，此时文件显然不在目标目录内。
+        # Для разных букв дисков в Windows commonpath не вычисляется — значит, файл заведомо вне целевого каталога.
         return False
 
 
@@ -1170,7 +1183,7 @@ def _resolve_managed_resource_file(
     resource_dir: str,
     description: str,
 ) -> str:
-    """解析项目资源文件，并确保绝对路径仍位于对应资源目录内。"""
+    """Разрешает файл ресурсов проекта и следит, чтобы абсолютный путь оставался внутри соответствующего каталога ресурсов."""
     from app.utils import utils
 
     expanded_path = os.path.expanduser(raw_path.strip())
@@ -1197,20 +1210,22 @@ def _validate_cli_files(
     params: VideoParams, stop_at: str
 ) -> tuple[str, list[tuple[MaterialInfo, str, str]]]:
     """
-    无副作用地解析并校验 CLI 文件，避免批量预检留下素材副本。
+    Разрешает и проверяет файлы CLI без побочных эффектов, чтобы пакетная
+    предпроверка не оставляла копии материалов.
 
-    自定义音频、BGM 和字体会被规范化为服务层可使用的路径或名称；本地素材
-    仅解析来源和扩展名，实际复制由 ``_prepare_cli_materials`` 在所有批量条目
-    校验通过后统一完成。
+    Пользовательское аудио, BGM и шрифты приводятся к пути или имени, пригодным
+    для сервисного слоя; для локальных материалов разбираются только источник и
+    расширение, а реальное копирование выполняет ``_prepare_cli_materials`` уже
+    после того, как все элементы пакета прошли проверку.
     """
     from app.models import const
     from app.services import bgm as bgm_service
     from app.utils import utils
 
-    # FFmpeg 探测已经移到 app/services/task.py 的共享任务流水线（task.start）
-    # 里统一做硬性检查：探测失败会让任务以 preflight 阶段失败结束，run_cli()
-    # 会据此返回非零退出码。这里不再重复一次不阻断流程的检查，避免与流水线
-    # 里的判断结果不一致。
+    # Проверка FFmpeg перенесена в общий конвейер задач в app/services/task.py
+    # (task.start), где выполняется единой жёсткой проверкой: при неудаче задача
+    # завершается ошибкой на этапе preflight, и run_cli() возвращает ненулевой код.
+    # Повторять здесь неблокирующую проверку не нужно — её результат мог бы разойтись с решением конвейера.
 
     local_material_extensions = {
         *(f".{extension}" for extension in const.FILE_TYPE_VIDEOS),
@@ -1234,20 +1249,20 @@ def _validate_cli_files(
 
     if params.bgm_type == "custom":
         if not bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume):
-            # 0 音量时下游会统一跳过所有 BGM。这里同时清空文件参数，避免
-            # CLI 为一个不会被读取的文件执行路径解析、存在性检查或格式
-            # 校验。
+            # При нулевой громкости ниже по потоку любой BGM пропускается. Заодно очищаем
+            # файловый аргумент, чтобы CLI не разрешал путь, не проверял существование и
+            # формат файла, который всё равно не будет прочитан.
             params.bgm_file = ""
         elif not params.bgm_file:
-            # 缺少文件是否构成错误取决于通用 BGM 开关，不能在 argparse 阶段
-            # 无条件拦截，否则 ``custom + 0%`` 会和 WebUI、服务层行为不一致。
+            # Считать ли отсутствие файла ошибкой, решает общий переключатель BGM. Безусловно
+            # отсекать это на этапе argparse нельзя: иначе ``custom + 0%`` разойдётся с поведением WebUI и сервисного слоя.
             raise ValueError("--bgm-file is required when --bgm-type is custom")
         else:
             try:
-                # CLI、WebUI 和任务服务必须共用同一个 BGM 文件边界。这里直接
-                # 复用服务层解析，既支持用户上传目录和内置歌曲目录，也
-                # 自动继承新增音频格式及路径安全规则，避免多个入口分别
-                # 维护白名单。
+                # CLI, WebUI и сервис задач обязаны использовать одну и ту же границу файлов BGM.
+                # Переиспользуем разрешение из сервисного слоя: оно поддерживает и каталог
+                # пользовательских загрузок, и каталог встроенных композиций, а также
+                # автоматически подхватывает новые аудиоформаты и правила безопасности путей — не приходится вести белый список в нескольких точках входа.
                 params.bgm_file = bgm_service.resolve_bgm_file(params.bgm_file)
             except ValueError as exc:
                 supported_extensions = ", ".join(
@@ -1267,7 +1282,7 @@ def _validate_cli_files(
         )
         if not font_path.lower().endswith((".ttf", ".ttc")):
             raise ValueError("subtitle font must use the .ttf or .ttc extension")
-        # 下游根据 resource/fonts 内的文件名拼接路径，因此仍保留纯文件名。
+        # Ниже по потоку путь собирается из имени файла внутри resource/fonts, поэтому оставляем чистое имя файла.
         params.font_name = os.path.basename(font_path)
 
     if params.video_source != "local" or stop_at not in {"materials", "video"}:
@@ -1461,8 +1476,8 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
         logger.error(f"invalid CLI input: {exc}")
         return 2
 
-    # 帮助参数会在 parse_args 中直接退出。把业务服务延迟到这里导入，
-    # 保证 -h/--help 输出干净，同时不改变实际任务的初始化流程。
+    # Аргумент справки завершает работу прямо в parse_args. Импорт бизнес-сервисов
+    # отложен сюда, чтобы вывод -h/--help оставался чистым и при этом инициализация реальной задачи не менялась.
     from app.services import task as tm
     from app.utils import utils
 

@@ -23,7 +23,7 @@ WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
 
 
 def _attribute_name(node):
-    """把 ``module.function`` 形式的 AST 调用还原为稳定字符串。"""
+    """Приводит AST-вызов вида ``module.function`` к устойчивой строке."""
     names = []
     while isinstance(node, ast.Attribute):
         names.append(node.attr)
@@ -34,7 +34,7 @@ def _attribute_name(node):
 
 
 def _log_record(file_path, message="generation finished"):
-    """构造 ``format_log_record`` 需要的最小 loguru 记录。"""
+    """Собирает минимальную запись loguru, нужную для ``format_log_record``."""
     return {
         "file": SimpleNamespace(name=os.path.basename(file_path), path=file_path),
         "message": message,
@@ -43,10 +43,13 @@ def _log_record(file_path, message="generation finished"):
 
 def test_generation_controls_submit_background_task_instead_of_blocking_page():
     """
-    WebUI 生成按钮不能重新直接调用同步流水线。
+    Кнопка генерации в WebUI не должна снова напрямую вызывать синхронный
+    конвейер.
 
-    这是 Issue #1120 白屏的核心回归保护：只要完整页面脚本再次阻塞在
-    ``tm.start``，用户在生成期间刷新时仍可能收到指向旧渲染树的 delta。
+    Это основная защита от регрессии белого экрана из Issue #1120: пока скрипт
+    полной страницы снова блокируется на ``tm.start``, пользователь, обновивший
+    страницу во время генерации, может получить delta, указывающую на старое
+    дерево отрисовки.
     """
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     function = next(
@@ -67,10 +70,13 @@ def test_generation_controls_submit_background_task_instead_of_blocking_page():
 
 def test_webui_runtime_config_updates_do_not_use_blocking_writes():
     """
-    生成期间的普通控件 rerun 不能重新等待长任务持有的配置锁。
+    Обычный rerun виджета во время генерации не должен снова ждать лок
+    конфигурации, удерживаемый длинной задачей.
 
-    所有 WebUI 配置写入都必须经过非阻塞 helper；LLM 连接测试和语音试听可
-    使用 try lock 快速返回，但页面代码不能直接调用阻塞锁或阻塞保存函数。
+    Любая запись конфигурации в WebUI обязана идти через неблокирующий helper.
+    Тест подключения к LLM и прослушивание голоса могут быстро вернуться по try
+    lock, но код страницы не вправе напрямую вызывать блокирующий лок или
+    блокирующую функцию сохранения.
     """
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     calls = {
@@ -151,7 +157,7 @@ def test_webui_runtime_config_updates_do_not_use_blocking_writes():
 def test_completed_task_renders_subject_named_video_download(
     tmp_path, ui_config, expected_open_count
 ):
-    """完成任务应提供成片下载，并按 WebUI 配置决定是否自动打开目录。"""
+    """Завершённая задача даёт скачать готовый ролик, а открытие каталога определяется настройкой WebUI."""
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     selected_nodes = []
     target_names = {
@@ -252,7 +258,7 @@ def test_completed_task_renders_subject_named_video_download(
 
 
 def test_submit_generation_returns_while_pipeline_is_still_running():
-    """后台流水线未结束时，提交函数必须已经返回，让 Streamlit 完成本次渲染。"""
+    """Пока фоновый конвейер ещё работает, функция отправки обязана уже вернуть управление, чтобы Streamlit завершил текущую отрисовку."""
     task_id = "background-submit-test"
     started = threading.Event()
     release = threading.Event()
@@ -290,7 +296,7 @@ def test_submit_generation_returns_while_pipeline_is_still_running():
 
 
 def test_submit_generation_copies_params_before_starting_worker():
-    """页面后续 rerun 或流水线内部修改参数时，不能反向污染当前表单对象。"""
+    """Ни последующий rerun страницы, ни правка параметров внутри конвейера не должны загрязнять текущий объект формы."""
     params = VideoParams(video_subject="参数隔离测试")
     with patch.object(webui_task._task_manager, "add_task") as add_task:
         webui_task.submit_generation("copied-params-test", params, capture_logs=False)
@@ -302,7 +308,7 @@ def test_submit_generation_copies_params_before_starting_worker():
 
 
 def test_scheduling_failure_is_saved_as_terminal_task_state():
-    """队列或线程启动失败时不能让任务管理器永久停留在“生成中”。"""
+    """Сбой очереди или запуска потока не должен оставлять менеджер задач в состоянии «генерируется» навсегда."""
     task_id = "scheduling-failure-test"
     params = VideoParams(video_subject="调度失败测试")
     with patch.object(
@@ -321,7 +327,7 @@ def test_scheduling_failure_is_saved_as_terminal_task_state():
 
 
 def test_worker_logs_are_available_without_streamlit_session_state():
-    """后台日志写入线程安全缓存，页面只需轮询快照即可恢复实时日志。"""
+    """Фоновые логи пишутся в потокобезопасный буфер, и странице достаточно опрашивать снимок, чтобы показывать их в реальном времени."""
     task_id = "captured-log-test"
     with webui_task._task_logs_lock:
         webui_task._task_logs.pop(task_id, None)
@@ -357,11 +363,12 @@ def test_worker_logs_are_available_without_streamlit_session_state():
 
 def test_log_paths_stay_posix_style_on_every_platform():
     """
-    调用位置必须始终显示为 ``./app/services/task.py``。
+    Место вызова обязано всегда отображаться как ``./app/services/task.py``.
 
-    Windows 的 ``os.path.relpath`` 返回反斜杠分隔的路径，直接拼接会输出
-    ``./app\\services\\task.py``，同一份日志在不同系统上格式不一致，也无法
-    和上面按正斜杠断言的后台日志回归测试对齐。
+    ``os.path.relpath`` в Windows возвращает путь с обратными слэшами, и прямая
+    склейка дала бы ``./app\\services\\task.py``: один и тот же лог выглядел бы
+    по-разному в разных системах и не совпал бы с расположенным выше регрессным
+    тестом фоновых логов, который проверяет прямые слэши.
     """
     record = _log_record(
         os.path.join(logging_utils.PROJECT_ROOT, "app", "services", "task.py")
@@ -374,11 +381,14 @@ def test_log_paths_stay_posix_style_on_every_platform():
 
 def test_log_paths_on_another_mount_do_not_discard_the_record():
     """
-    映射盘或 ``subst`` 盘启动时不能让整条日志消失。
+    Запуск с примонтированного или ``subst``-диска не должен приводить к
+    исчезновению всей строки лога.
 
-    这种部署下调用栈里的路径仍在 ``X:``，而 ``PROJECT_ROOT`` 已被 realpath
-    解析回 ``C:``，``os.path.relpath`` 会抛出 ``ValueError``。loguru 捕获
-    格式化异常后会丢弃记录，终端和 WebUI 日志面板会同时变空。
+    При таком развёртывании путь в стеке вызовов остаётся на ``X:``, тогда как
+    ``PROJECT_ROOT`` уже разрешён realpath обратно в ``C:``, и
+    ``os.path.relpath`` бросает ``ValueError``. Перехватив исключение
+    форматирования, loguru выбрасывает запись, и терминал вместе с панелью логов
+    WebUI пустеют одновременно.
     """
     absolute_path = os.path.join(
         logging_utils.PROJECT_ROOT, "app", "services", "task.py"
@@ -397,7 +407,7 @@ def test_log_paths_on_another_mount_do_not_discard_the_record():
 
 
 def test_log_paths_outside_the_project_keep_the_absolute_path():
-    """项目目录之外的文件保持绝对路径，避免输出 ``./../..`` 这类回溯路径。"""
+    """Файлы вне каталога проекта сохраняют абсолютный путь, чтобы не выводить обратные пути вида ``./../..``."""
     outside_path = os.path.join(
         os.path.dirname(logging_utils.PROJECT_ROOT), "site-packages", "worker.py"
     )
@@ -409,7 +419,7 @@ def test_log_paths_outside_the_project_keep_the_absolute_path():
 
 
 def test_generation_log_fragment_refreshes_within_half_a_second():
-    """日志轮询间隔不能退回到明显落后于终端输出的秒级刷新。"""
+    """Интервал опроса логов не должен возвращаться к секундному обновлению, заметно отстающему от вывода в терминал."""
     assert webui_task.TASK_LOG_REFRESH_INTERVAL_SECONDS <= 0.5
 
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
@@ -430,11 +440,12 @@ def test_generation_log_fragment_refreshes_within_half_a_second():
 
 def test_generation_submit_skips_duplicate_config_save():
     """
-    提交任务后不能在页面末尾再次等待配置锁。
+    После отправки задачи в конце страницы нельзя снова ждать лок конфигурации.
 
-    后台任务会在完整生成期间持有 runtime_config_lock。生成分支已经请求过
-    非阻塞保存，页面末尾无需重复请求；普通交互则继续通过同一个非阻塞 helper
-    保存，不能重新退回 config.save_config。
+    Фоновая задача держит runtime_config_lock всю генерацию. Ветка генерации уже
+    запросила неблокирующее сохранение, и повторять запрос в конце страницы
+    незачем; обычные взаимодействия продолжают сохраняться через тот же
+    неблокирующий helper и не должны откатываться к config.save_config.
     """
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     controls = next(
@@ -481,7 +492,7 @@ def test_generation_submit_skips_duplicate_config_save():
 
 
 def test_terminal_logger_reload_preserves_task_log_handler():
-    """热重载只能替换终端 handler，不能清空后台任务的日志 sink。"""
+    """Горячая перезагрузка вправе заменить только терминальный handler, но не очищать sink логов фоновой задачи."""
     previous_handler_id = logging_utils._terminal_handler_id
     try:
         with (
@@ -504,7 +515,7 @@ def test_terminal_logger_reload_preserves_task_log_handler():
 
 
 def test_worker_wrapper_failure_is_saved_instead_of_leaving_processing_state():
-    """日志或配置包装层异常也必须转换成可查询的失败终态。"""
+    """Исключение в обёртке логов или конфигурации тоже обязано превратиться в наблюдаемый финальный статус ошибки."""
     task_id = "worker-wrapper-failure-test"
     with (
         patch.object(webui_task.tm, "start", side_effect=RuntimeError("lock failed")),

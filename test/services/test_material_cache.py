@@ -58,8 +58,9 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_cache_round_trip_preserves_material_fields(self):
         """
-        磁盘缓存必须能跨进程恢复 MaterialInfo 所需的全部字段，不能只缓存 URL
-        后丢失 provider 或 duration，导致后续下载与时长计算行为发生变化。
+        Дисковый кэш обязан восстанавливать между процессами все поля, нужные
+        MaterialInfo. Нельзя кэшировать один URL, теряя provider или duration, —
+        иначе поведение последующей загрузки и расчёта длительности изменится.
         """
         saved = material_cache.save_material_search_cache(
             provider="pixabay",
@@ -93,8 +94,10 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_expired_cache_is_removed_and_treated_as_miss(self):
         """
-        Pixabay 要求搜索结果最多复用 24 小时。过期文件必须立即失效并删除，
-        防止旧素材 URL 被无限复用，也避免缓存目录持续积累无效 JSON。
+        Pixabay требует переиспользовать результаты поиска не дольше 24 часов.
+        Просроченный файл должен немедленно становиться недействительным и
+        удаляться, чтобы старые URL материалов не переиспользовались бесконечно,
+        а каталог кэша не копил бесполезные JSON.
         """
         material_cache.save_material_search_cache(
             provider="pixabay",
@@ -120,7 +123,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         self.assertFalse(cache_path.exists())
 
     def test_future_dated_cache_is_removed_and_treated_as_miss(self):
-        """系统时间异常时不能让未来时间戳绕过 24 小时有效期。"""
+        """При сбое системного времени метка из будущего не должна обходить 24-часовой срок годности."""
         material_cache.save_material_search_cache(
             provider="pixabay",
             search_term="nature",
@@ -146,8 +149,10 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_corrupted_cache_is_removed_without_breaking_search(self):
         """
-        进程异常退出、磁盘故障或用户手动修改都可能留下损坏文件。读取失败应回退
-        到远端搜索并清理坏文件，不能让一个缓存永久阻断素材生成。
+        Аварийное завершение процесса, сбой диска или ручная правка пользователем
+        могут оставить повреждённый файл. При ошибке чтения нужно откатиться к
+        удалённому поиску и удалить битый файл: один элемент кэша не может
+        навсегда блокировать генерацию материалов.
         """
         cache_path = self._cache_path()
         cache_path.write_text("{invalid-json", encoding="utf-8")
@@ -166,8 +171,10 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_empty_results_are_not_cached(self):
         """
-        当前 provider 接口用 [] 同时表示没有结果和请求失败。缓存空列表会把
-        Cloudflare 拦截或短暂网络故障固化 24 小时，因此只能缓存非空成功结果。
+        Текущий интерфейс провайдера обозначает пустым списком и отсутствие
+        результатов, и неудачный запрос. Закэшировав пустой список, мы
+        зафиксировали бы на 24 часа блокировку Cloudflare или кратковременный
+        сетевой сбой, поэтому кэшируются только непустые успешные результаты.
         """
         saved = material_cache.save_material_search_cache(
             provider="pixabay",
@@ -182,8 +189,9 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_cache_file_does_not_contain_search_parameters_or_credentials(self):
         """
-        缓存文件名使用摘要，内容只保存素材字段。即使用户共享 storage 目录，
-        文件中也不应出现关键词、API Key 或其它请求配置。
+        Имя файла кэша — это хэш, а в содержимом хранятся только поля материала.
+        Даже если пользователь поделится каталогом storage, в файле не должно
+        оказаться ключевых слов, API-ключа или иных настроек запроса.
         """
         item = self._item()
         item.source_info["source_page"] += "?token=drop"
@@ -206,7 +214,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         self.assertNotIn("token=drop", raw_payload)
 
     def test_coverr_signed_urls_are_never_cached(self):
-        """Coverr 下载地址包含签名 JWT，不能进入可长期保留的磁盘缓存。"""
+        """Адрес скачивания Coverr содержит подписанный JWT и не должен попадать в долго хранящийся дисковый кэш."""
         item = self._item(
             "https://storage.coverr.co/video/download?token=signed-jwt"
         )
@@ -225,7 +233,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         self.assertEqual(list(Path(self.temp_dir.name).glob("*.json")), [])
 
     def test_coverr_cache_load_removes_legacy_signed_url(self):
-        """访问 Coverr 时应清理旧版本可能留下的签名下载地址缓存。"""
+        """При обращении к Coverr нужно вычищать кэш подписанных адресов скачивания, который могла оставить прежняя версия."""
         cache_path = material_cache._cache_path(
             provider="coverr",
             search_term="nature",
@@ -259,7 +267,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         self.assertFalse(cache_path.exists())
 
     def test_version_one_cache_is_invalidated(self):
-        """旧缓存缺少来源信息，升级后必须重新查询而不能生成残缺任务记录。"""
+        """В старом кэше нет сведений об источнике, поэтому после обновления нужен новый запрос, а не битая запись задачи."""
         cache_path = self._cache_path()
         cache_path.write_text(
             json.dumps(
@@ -289,8 +297,10 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_cache_key_separates_provider_duration_and_aspect(self):
         """
-        素材源、最小时长和画幅都会改变远端搜索结果，任何一个参数变化都必须
-        使用独立缓存，避免把不符合当前任务要求的素材返回给视频生成流程。
+        Источник материалов, минимальная длительность и соотношение сторон меняют
+        результат удалённого поиска, поэтому изменение любого из параметров
+        обязано давать отдельный кэш — иначе в генерацию видео попадут материалы,
+        не подходящие текущей задаче.
         """
         base_path = material_cache._cache_path(
             provider="pixabay",
@@ -324,8 +334,10 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_search_wrapper_reuses_cache_across_calls(self):
         """
-        第一次调用远端搜索并写缓存，第二次相同参数必须直接复用磁盘结果。
-        这是减少 Pixabay API 调用和 Cloudflare 风控触发概率的核心行为。
+        Первый вызов идёт в удалённый поиск и пишет кэш, второй с теми же
+        параметрами обязан взять результат прямо с диска. Это ключевое поведение
+        для сокращения числа вызовов API Pixabay и вероятности сработать на
+        защиту Cloudflare.
         """
         remote_search = Mock(return_value=[self._item()])
 
@@ -349,8 +361,10 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_search_wrapper_refreshes_mixed_orientation_cache(self):
         """
-        升级前的缓存可能混入其它方向的素材。只返回过滤后的少量条目会降低素材
-        多样性，因此发现任意方向不匹配时应重新请求并替换整个候选集。
+        В кэше, созданном до обновления, могут оказаться материалы другой
+        ориентации. Возврат небольшого отфильтрованного набора снизил бы
+        разнообразие материалов, поэтому при любом несовпадении ориентации нужно
+        сделать новый запрос и заменить весь набор кандидатов.
         """
         portrait_item = self._item("https://example.com/old-portrait.mp4")
         landscape_item = self._item("https://example.com/old-landscape.mp4")
@@ -394,7 +408,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         )
 
     def test_square_search_reuses_crop_compatible_cache(self):
-        """方形任务应继续复用可裁剪素材缓存，不能因原始方向不同反复请求远端。"""
+        """Квадратная задача продолжает переиспользовать кэш материалов, пригодных для обрезки, и не ходит к удалённому сервису снова из-за другой исходной ориентации."""
         landscape_item = self._item("https://example.com/landscape.mp4")
         landscape_item.source_info["rendition"] = {
             "id": "large",
@@ -425,7 +439,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         )
 
     def test_search_wrapper_retries_after_empty_result(self):
-        """空结果不缓存，下一次调用仍应访问远端，以便临时故障恢复后自动重试。"""
+        """Пустой результат не кэшируется: следующий вызов снова идёт к удалённому сервису, чтобы после устранения временного сбоя попытка повторилась автоматически."""
         remote_search = Mock(return_value=[])
 
         for _ in range(2):
@@ -441,7 +455,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         self.assertEqual(remote_search.call_count, 2)
 
     def test_cache_read_failure_falls_back_to_remote_search(self):
-        """缓存读取异常只能降级为未命中，不能阻断远端素材搜索。"""
+        """Ошибка чтения кэша деградирует только до промаха и не прерывает удалённый поиск материалов."""
         remote_items = [self._item()]
         remote_search = Mock(return_value=remote_items)
 
@@ -463,7 +477,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         self.assertTrue(warning.called)
 
     def test_cache_write_failure_keeps_remote_results(self):
-        """远端搜索成功后，即使缓存写入失败也必须继续返回可用素材。"""
+        """После успешного удалённого поиска пригодные материалы возвращаются даже при неудачной записи кэша."""
         remote_items = [self._item()]
         remote_search = Mock(return_value=remote_items)
 
@@ -489,7 +503,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         self.assertTrue(warning.called)
 
     def test_invalid_cache_item_does_not_raise(self):
-        """异常素材对象不能让可选缓存写入破坏调用方主流程。"""
+        """Некорректный объект материала не должен через опциональную запись кэша ломать основной поток вызывающей стороны."""
         with patch.object(material_cache.logger, "warning") as warning:
             saved = material_cache.save_material_search_cache(
                 provider="pixabay",
@@ -504,8 +518,9 @@ class TestMaterialSearchCache(unittest.TestCase):
 
     def test_concurrent_identical_searches_share_remote_request(self):
         """
-        API 服务允许多个任务并发。相同条件首次搜索时，后到线程应等待首个线程
-        写入缓存，而不是再次消耗第三方接口额度。
+        Сервис API допускает несколько параллельных задач. При первом поиске с
+        одинаковыми условиями пришедший позже поток обязан дождаться, пока первый
+        запишет кэш, а не расходовать квоту стороннего API повторно.
         """
         remote_started = threading.Event()
         allow_remote_finish = threading.Event()
@@ -537,7 +552,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         first_thread.start()
         self.assertTrue(remote_started.wait(timeout=2))
         second_thread.start()
-        # 给第二个线程时间进入缓存锁等待区，确保测试覆盖真实并发未命中。
+        # Даём второму потоку время дойти до ожидания на локе кэша, чтобы тест покрывал настоящий параллельный промах.
         time.sleep(0.05)
         allow_remote_finish.set()
         first_thread.join(timeout=2)
@@ -550,7 +565,7 @@ class TestMaterialSearchCache(unittest.TestCase):
         self.assertEqual(results[0], results[1])
 
     def test_cleanup_removes_expired_entries_only(self):
-        """低频清理只删除过期缓存，不应影响有效缓存或用户的其它文件。"""
+        """Нечастая уборка удаляет только просроченный кэш и не затрагивает действующий кэш и прочие файлы пользователя."""
         stale_path = self._cache_path()
         stale_path.write_text(
             json.dumps(

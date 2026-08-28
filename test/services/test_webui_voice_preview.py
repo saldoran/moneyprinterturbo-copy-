@@ -22,7 +22,7 @@ WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
 
 
 def _load_duration_estimator():
-    """只加载纯估算函数，避免单元测试导入并执行完整 Streamlit 页面。"""
+    """Загружает только чистые функции оценки, чтобы юнит-тест не импортировал и не выполнял всю страницу Streamlit."""
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     function = next(
         node
@@ -37,7 +37,7 @@ def _load_duration_estimator():
 
 
 def _load_provider_signature(test_config):
-    """加载凭证摘要和 Provider 指纹函数，独立验证缓存失效规则。"""
+    """Загружает функции хэша учётных данных и отпечатка провайдера, чтобы отдельно проверить правила инвалидации кэша."""
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     functions = [
         node
@@ -64,7 +64,7 @@ def _button_by_key(app, key):
 
 
 def test_duration_estimator_is_local_and_respects_voice_rate():
-    """本地估算应覆盖中英文，并随用户选择的语速合理缩短。"""
+    """Локальная оценка покрывает китайский и английский и разумно сокращается при выбранной пользователем скорости речи."""
     estimate = _load_duration_estimator()
     script = "人工智能正在改变日常生活。它可以帮助我们整理信息，也能提高效率。"
 
@@ -80,7 +80,7 @@ def test_duration_estimator_is_local_and_respects_voice_rate():
 
 
 def test_provider_signature_changes_when_api_key_changes():
-    """只修改 API Key 也必须让试听缓存失效，不能伪装成新凭证验证成功。"""
+    """Смена одного лишь API-ключа обязана сбрасывать кэш прослушивания: нельзя выдавать это за успешную проверку новых учётных данных."""
     test_config = SimpleNamespace(
         app={"gemini_api_key": "old-gemini", "mimo_api_key": "old-mimo"},
         azure={"speech_region": "eastasia", "speech_key": "old-azure"},
@@ -104,7 +104,7 @@ def test_provider_signature_changes_when_api_key_changes():
 
 
 def test_full_voiceover_preview_is_disabled_until_script_exists():
-    """完整预览必须由用户主动触发，文案为空时不能误调用商业 TTS。"""
+    """Полный предпросмотр запускает только пользователь; при пустом тексте платный TTS вызываться не должен."""
     test_ui = dict(
         config.ui,
         voice_mode="tts",
@@ -128,7 +128,7 @@ def test_full_voiceover_preview_is_disabled_until_script_exists():
 
 
 def test_script_shows_estimate_and_enables_full_voiceover_preview():
-    """填写文案后展示免费估算，并明确完整预览可能产生 API 成本。"""
+    """После ввода текста показывается бесплатная оценка и явно предупреждается, что полный предпросмотр может стоить денег."""
     test_ui = dict(
         config.ui,
         voice_mode="tts",
@@ -157,7 +157,7 @@ def test_script_shows_estimate_and_enables_full_voiceover_preview():
 
 
 def test_short_preview_autoplays_only_after_explicit_click_and_reuses_cache():
-    """短试听应立即播放；普通 rerun 不重播，重复点击也不重复调用 TTS。"""
+    """Короткое прослушивание играет сразу; обычный rerun не перезапускает его, а повторные нажатия не дёргают TTS заново."""
     test_ui = dict(
         config.ui,
         voice_mode="tts",
@@ -197,7 +197,7 @@ def test_short_preview_autoplays_only_after_explicit_click_and_reuses_cache():
 
 
 def test_full_preview_uses_script_and_reuses_identical_cached_audio():
-    """完整试听使用当前文案，相同参数重复点击时不得再次调用 TTS。"""
+    """Полное прослушивание использует текущий текст; при тех же параметрах повторное нажатие не вызывает TTS снова."""
     script = "这是一段用于验证完整配音预览缓存的测试文案。"
     test_ui = dict(
         config.ui,
@@ -207,8 +207,8 @@ def test_full_preview_uses_script_and_reuses_identical_cached_audio():
     )
 
     def fake_tts(**kwargs):
-        # 文件扩展名虽然是 mp3，但真实 TTS 可能返回 WAV；这个最小文件头同时
-        # 验证 WebUI 会按内容识别播放器 MIME，而不是盲信扩展名。
+        # Расширение файла — mp3, но реальный TTS может вернуть WAV. Этот минимальный
+        # заголовок заодно проверяет, что WebUI определяет MIME плеера по содержимому, а не слепо верит расширению.
         Path(kwargs["voice_file"]).write_bytes(
             b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 32
         )
@@ -243,7 +243,7 @@ def test_full_preview_uses_script_and_reuses_identical_cached_audio():
 
 
 def test_full_preview_reports_when_tts_returns_no_audio():
-    """TTS 返回空结果时必须给出可操作提示，不能让按钮点击后无任何反馈。"""
+    """Если TTS вернул пустой результат, нужна понятная подсказка: нажатие кнопки не может остаться без отклика."""
     test_ui = dict(
         config.ui,
         voice_mode="tts",
@@ -271,7 +271,7 @@ def test_full_preview_reports_when_tts_returns_no_audio():
 
 
 def test_full_preview_returns_immediately_when_runtime_config_is_busy():
-    """后台任务持有配置锁时，试听应提示稍后重试而不是阻塞页面。"""
+    """Пока фоновая задача держит лок конфигурации, прослушивание предлагает повторить позже, а не блокирует страницу."""
     test_ui = dict(
         config.ui,
         voice_mode="tts",
@@ -303,7 +303,7 @@ def test_full_preview_returns_immediately_when_runtime_config_is_busy():
 
 
 def test_full_preview_warns_when_audio_duration_is_unavailable():
-    """音频可播放但无法解码时长时，不能把 0.0 秒展示为真实结果。"""
+    """Если аудио проигрывается, но длительность не декодируется, показывать 0.0 секунды как настоящий результат нельзя."""
     test_ui = dict(
         config.ui,
         voice_mode="tts",
@@ -338,7 +338,7 @@ def test_full_preview_warns_when_audio_duration_is_unavailable():
 
 
 def test_task_reuses_matching_full_preview_without_calling_tts():
-    """参数完全一致时，正式任务应复用试听音频和字幕时间轴。"""
+    """При полностью совпадающих параметрах боевая задача переиспользует аудио прослушивания и тайминги субтитров."""
     task_id = "reuse-full-voice-preview"
     task_dir = Path(utils.task_dir(task_id))
     audio_file = task_dir / "audio.mp3"
@@ -378,7 +378,7 @@ def test_task_reuses_matching_full_preview_without_calling_tts():
 
 
 def test_task_regenerates_audio_when_preview_parameters_changed():
-    """文案或配音参数变化后必须回退 TTS，不能复用已经过期的完整试听。"""
+    """После изменения текста или параметров озвучки нужно снова обратиться к TTS: устаревшее полное прослушивание переиспользовать нельзя."""
     task_id = "stale-full-voice-preview"
     task_dir = Path(utils.task_dir(task_id))
     audio_file = task_dir / "audio.mp3"
@@ -426,7 +426,7 @@ def test_task_regenerates_audio_when_preview_parameters_changed():
 
 
 def test_non_default_volume_regenerates_audio_without_double_gain():
-    """非默认音量必须回退原流程，避免 TTS 与视频合成阶段重复应用增益。"""
+    """Нестандартная громкость возвращает исходный сценарий, чтобы усиление не применилось дважды — на этапе TTS и на этапе монтажа."""
     task_id = "voice-volume-forwarding"
     task_dir = Path(utils.task_dir(task_id))
     audio_file = task_dir / "audio.mp3"
@@ -470,7 +470,7 @@ def test_non_default_volume_regenerates_audio_without_double_gain():
 
 
 def test_webui_worker_forwards_voice_preview_to_pipeline():
-    """后台任务包装层不能丢失提交时已经校验过的试听缓存。"""
+    """Обёртка фоновой задачи не должна терять кэш прослушивания, уже проверенный в момент отправки."""
     preview = {"audio_file": "audio.mp3", "duration": 5.0}
     with (
         patch.object(webui_task.tm, "start", return_value={"videos": []}) as start,

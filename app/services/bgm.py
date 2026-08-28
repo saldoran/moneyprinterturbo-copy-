@@ -11,8 +11,9 @@ from loguru import logger
 from app.utils import file_security, utils
 
 
-# Streamlit 默认允许较大的上传文件，但背景音乐通常只有几 MB。这里设置明确的
-# 服务端上限，避免 API 或 WebUI 把超大文件完整写入磁盘，影响同一进程中的视频任务。
+# Streamlit по умолчанию разрешает довольно крупные загрузки, но фоновая музыка
+# обычно весит несколько МБ. Явный серверный лимит не даёт API или WebUI записать
+# на диск огромный файл целиком и помешать задачам видео в том же процессе.
 MAX_BGM_UPLOAD_BYTES = 30 * 1024 * 1024
 _COPY_CHUNK_BYTES = 1024 * 1024
 _INTERNAL_UPLOAD_PREFIX = ".bgm-upload-"
@@ -22,9 +23,11 @@ _WINDOWS_RESERVED_FILENAMES = frozenset(
     | {f"COM{index}" for index in range(1, 10)}
     | {f"LPT{index}" for index in range(1, 10)}
 )
-# MoviePy 最终通过 FFmpeg 解码背景音乐，因此不需要人为限制为 MP3。这里仅开放
-# 主流且语义明确的音频扩展名，避免把 MP4 等带视频容器误当作背景音乐上传。
-# 元组同时作为 WebUI 上传控件的单一数据源，后续增删格式时不会出现前后端不一致。
+# Фоновую музыку в итоге декодирует FFmpeg через MoviePy, поэтому искусственно
+# ограничиваться MP3 незачем. Открываем только распространённые и однозначные
+# аудиорасширения, чтобы контейнеры с видео вроде MP4 не загружались как музыка.
+# Тот же кортеж — единственный источник данных для контроля загрузки в WebUI, так
+# что при добавлении или удалении формата бэкенд и фронтенд не разойдутся.
 SUPPORTED_BGM_EXTENSIONS = (
     ".mp3",
     ".m4a",
@@ -38,20 +41,23 @@ SUPPORTED_BGM_EXTENSIONS = (
 
 
 class BgmUploadError(ValueError):
-    """表示上传文件不满足背景音乐的安全或格式要求。"""
+    """Загруженный файл не удовлетворяет требованиям безопасности или формата для фоновой музыки."""
 
 
 class BgmServiceError(RuntimeError):
-    """表示 FFmpeg 或文件系统不可用等服务端执行故障。"""
+    """Серверный сбой выполнения: недоступен FFmpeg, файловая система и тому подобное."""
 
 
 def should_use_bgm(bgm_type: str | None, bgm_volume: float | None) -> bool:
     """
-    统一判断当前任务是否需要处理任何背景音乐。
+    Единообразно решает, нужно ли текущей задаче вообще обрабатывать фоновую
+    музыку.
 
-    该规则与具体来源无关：没有选择来源、音量不合法或音量不大于 0 时，随机、
-    自定义、Sonilo 以及未来新增的提供商都必须跳过文件解析、外部生成和最终混音。
-    放在通用 BGM 服务中可以避免每增加一个提供商就复制一套 0 音量判断。
+    Правило не зависит от источника: если источник не выбран, громкость
+    некорректна или не превышает 0, то и случайный, и пользовательский, и Sonilo,
+    и любой будущий поставщик обязаны пропустить разбор файла, внешнюю генерацию
+    и финальное сведение. Место в общем сервисе BGM избавляет от копирования
+    проверки нулевой громкости под каждого нового поставщика.
     """
     if not str(bgm_type or "").strip():
         return False
@@ -64,23 +70,25 @@ def should_use_bgm(bgm_type: str | None, bgm_volume: float | None) -> bool:
 
 def uploaded_bgm_dir(create: bool = True) -> str:
     """
-    返回用户背景音乐的持久化目录。
+    Возвращает каталог постоянного хранения пользовательской фоновой музыки.
 
-    内置歌曲属于代码资源，继续放在 resource/songs；用户上传内容属于运行时数据，
-    必须放在 Docker 已挂载的 storage 下，容器重建后才能保留，也不会污染 Git 工作区。
+    Встроенные композиции — ресурс кода и остаются в resource/songs. Загруженное
+    пользователем относится к данным рантайма и обязано лежать под смонтированным
+    в Docker каталогом storage: только так оно переживёт пересоздание контейнера
+    и не засорит рабочую копию Git.
     """
     return utils.storage_dir("bgm", create=create)
 
 
 def _remove_staged_file(file_path: str) -> None:
-    """尽力清理上传临时文件，且不覆盖调用方正在处理的原始异常。"""
+    """По возможности удаляет временный файл загрузки, не подменяя исходное исключение, которое обрабатывает вызывающая сторона."""
     if not file_path or not os.path.exists(file_path):
         return
     try:
         os.remove(file_path)
     except OSError as exc:
-        # 临时文件使用保留前缀，不会进入 BGM 列表；清理失败不应把“音频非法”
-        # 等更准确的原始异常覆盖掉，但必须留下路径和系统错误供运维定位。
+        # У временного файла зарезервированный префикс, и в список BGM он не попадает.
+        # Неудачная уборка не должна затирать более точное исходное исключение вроде «некорректное аудио», но обязана оставить путь и системную ошибку для эксплуатации.
         logger.warning(
             f"failed to remove staged background music: path={file_path}, "
             f"error={str(exc)}"
@@ -88,7 +96,7 @@ def _remove_staged_file(file_path: str) -> None:
 
 
 def sanitize_upload_filename(filename: str) -> str:
-    """提取可跨平台展示的音频文件名，并拒绝非法名称与不支持的扩展名。"""
+    """Извлекает имя аудиофайла, пригодное для показа на любой платформе, отклоняя недопустимые имена и неподдерживаемые расширения."""
     safe_name = (filename or "").replace("\\", "/").split("/")[-1].strip()
     if (
         not safe_name
@@ -100,9 +108,9 @@ def sanitize_upload_filename(filename: str) -> str:
     ):
         raise BgmUploadError("invalid background music filename")
 
-    # Windows 会把扩展名前的首段识别为设备名，例如 CON.mp3、LPT1.wav 都
-    # 不能作为普通文件创建。即使服务端最终使用 UUID，提前拒绝这类名称也能
-    # 保证 API 在不同平台上的输入行为一致。
+    # Windows считает первую часть имени до расширения именем устройства: например,
+    # CON.mp3 и LPT1.wav обычными файлами не создать. Даже при том, что сервер в
+    # итоге использует UUID, ранний отказ по таким именам делает поведение API на разных платформах одинаковым.
     windows_basename = safe_name.split(".", 1)[0].rstrip(" .").upper()
     if windows_basename in _WINDOWS_RESERVED_FILENAMES:
         raise BgmUploadError("invalid background music filename")
@@ -119,12 +127,16 @@ def sanitize_upload_filename(filename: str) -> str:
 
 def _validate_audio(file_path: str, timeout_seconds: int = 30) -> None:
     """
-    仅使用项目当前配置的 FFmpeg 验证文件包含可完整解码的音频流。
+    Проверяет, что файл содержит полностью декодируемый аудиопоток, используя
+    только тот FFmpeg, который настроен в проекте.
 
-    项目允许 imageio-ffmpeg 提供便携 FFmpeg，该安装方式不保证同时存在
-    FFprobe，因此不能新增独立二进制依赖。`-map 0:a:0` 会在没有音频流时失败，
-    `-xerror` 会把解码错误提升为失败；完整解码还能拦截加密文件或随机数据偶然
-    命中音频帧头的误判。文件可以包含专辑封面等附加流，但只校验第一条音频流。
+    Проект допускает переносимый FFmpeg от imageio-ffmpeg, а такая установка не
+    гарантирует наличие FFprobe, поэтому новую двоичную зависимость добавлять
+    нельзя. `-map 0:a:0` завершится ошибкой, если аудиопотока нет, а `-xerror`
+    превращает ошибку декодирования в отказ. Полное декодирование заодно ловит
+    случаи, когда зашифрованный файл или случайные данные ненароком совпали с
+    заголовком аудиокадра. Файл может содержать дополнительные потоки вроде
+    обложки альбома, но проверяется только первый аудиопоток.
     """
     try:
         decoded = subprocess.run(
@@ -156,10 +168,12 @@ def _validate_audio(file_path: str, timeout_seconds: int = 30) -> None:
 
 def validate_audio_file(file_path: str, timeout_seconds: int = 120) -> None:
     """
-    校验磁盘上的音频文件可由项目 FFmpeg 完整解码。
+    Проверяет, что аудиофайл на диске полностью декодируется проектным FFmpeg.
 
-    上传预检通常只需 30 秒；Sonilo 生成的配乐最长可达 6 分钟，因此对外提供
-    可调整超时的复用入口。服务只依赖 FFmpeg，不要求系统额外安装 FFprobe。
+    Предпроверке при загрузке обычно хватает 30 секунд, а музыка от Sonilo может
+    длиться до 6 минут, поэтому наружу отдаётся переиспользуемая точка входа с
+    настраиваемым таймаутом. Сервис зависит только от FFmpeg и не требует
+    отдельно устанавливать FFprobe.
     """
     if not os.path.isfile(file_path) or os.path.getsize(file_path) <= 0:
         raise BgmUploadError("background music file is empty or missing")
@@ -168,11 +182,14 @@ def validate_audio_file(file_path: str, timeout_seconds: int = 120) -> None:
 
 def _stage_bgm_upload(filename: str, source: BinaryIO) -> tuple[str, str, int]:
     """
-    将上传流写入同目录临时文件，并返回安全文件名、临时路径和字节数。
+    Пишет поток загрузки во временный файл в том же каталоге и возвращает
+    безопасное имя, временный путь и число байт.
 
-    WebUI 的上传预检和最终持久化必须使用完全相同的分块读取、大小限制与文件名
-    规则，否则可能出现界面显示可用、点击生成后却被服务端拒绝的状态分裂。
-    临时文件由调用方在完成音频探测后删除或原子替换。
+    Предпроверка в WebUI и финальное сохранение обязаны использовать ровно
+    одинаковые правила чтения по частям, ограничения размера и формирования
+    имени: иначе интерфейс покажет файл пригодным, а сервер отклонит его после
+    нажатия «Сгенерировать». Временный файл удаляет или атомарно подменяет
+    вызывающая сторона после проверки аудио.
     """
     safe_name = sanitize_upload_filename(filename)
     try:
@@ -188,8 +205,8 @@ def _stage_bgm_upload(filename: str, source: BinaryIO) -> tuple[str, str, int]:
         except (AttributeError, OSError) as exc:
             raise BgmUploadError("background music upload is not seekable") from exc
 
-        # 保留原始扩展名便于 FFmpeg 针对无容器头的 AAC 等格式选择正确的
-        # demuxer；临时文件仍放在目标目录，以保证最终 os.replace 是原子操作。
+        # Сохраняем исходное расширение, чтобы FFmpeg выбрал верный demuxer для форматов
+        # без заголовка контейнера вроде AAC. Временный файл остаётся в целевом каталоге, чтобы финальный os.replace был атомарным.
         descriptor, temp_path = tempfile.mkstemp(
             prefix=_INTERNAL_UPLOAD_PREFIX,
             suffix=Path(safe_name).suffix.lower(),
@@ -220,8 +237,8 @@ def _stage_bgm_upload(filename: str, source: BinaryIO) -> tuple[str, str, int]:
             raise BgmServiceError("failed to stage background music upload") from exc
         raise
     finally:
-        # Streamlit 还需要使用同一个 UploadedFile 做浏览器试听；恢复文件指针可
-        # 避免校验后播放器或最终保存读取到空内容。
+        # Тот же UploadedFile нужен Streamlit для прослушивания в браузере. Возврат
+        # файлового указателя не даёт плееру или финальному сохранению прочитать пустоту после проверки.
         try:
             source.seek(0)
         except (AttributeError, OSError):
@@ -229,7 +246,7 @@ def _stage_bgm_upload(filename: str, source: BinaryIO) -> tuple[str, str, int]:
 
 
 def validate_bgm_upload(filename: str, source: BinaryIO) -> str:
-    """完整校验上传音频但不持久化，用于 WebUI 在显示“已就绪”前预检。"""
+    """Полностью проверяет загруженное аудио без сохранения — предпроверка WebUI перед показом статуса «готово»."""
     safe_name, temp_path, total_bytes = _stage_bgm_upload(filename, source)
     try:
         _validate_audio(temp_path)
@@ -244,12 +261,16 @@ def validate_bgm_upload(filename: str, source: BinaryIO) -> str:
 
 def save_bgm_upload(filename: str, source: BinaryIO) -> str:
     """
-    以分块、限量和原子替换的方式保存用户背景音乐。
+    Сохраняет пользовательскую фоновую музыку по частям, с ограничением объёма и
+    атомарной подменой.
 
-    使用场景包括 FastAPI UploadFile 和 Streamlit UploadedFile，两者都提供二进制
-    文件接口。先写同目录临时文件并验证，再通过 os.replace 原子落盘，既能避免
-    并发上传或进程中断留下半个音频文件，也会让同名上传获得不同的 UUID 存储键，
-    已排队或运行中的任务因此始终引用原来的不可变文件。
+    Сценарии использования — UploadFile из FastAPI и UploadedFile из Streamlit;
+    оба дают двоичный файловый интерфейс. Сначала пишется и проверяется временный
+    файл в том же каталоге, затем os.replace атомарно кладёт его на место. Так
+    параллельные загрузки или прерывание процесса не оставляют половину
+    аудиофайла, а загрузка файла с тем же именем получает другой ключ хранения на
+    основе UUID — поэтому уже поставленные в очередь и выполняющиеся задачи
+    всегда ссылаются на прежний неизменяемый файл.
     """
     safe_name, temp_path, total_bytes = _stage_bgm_upload(filename, source)
     stored_name = f"{uuid4().hex}{Path(safe_name).suffix.lower()}"
@@ -272,22 +293,22 @@ def save_bgm_upload(filename: str, source: BinaryIO) -> str:
 
 
 def list_bgm_files() -> list[str]:
-    """列出用户上传和内置的可用背景音乐。"""
+    """Перечисляет доступную фоновую музыку: загруженную пользователем и встроенную."""
     files_by_name: dict[str, str] = {}
     for directory in (utils.song_dir(), uploaded_bgm_dir(create=True)):
         if not os.path.isdir(directory):
             continue
         for name in sorted(os.listdir(directory), key=str.lower):
-            # 上传预检和最终保存都会短暂创建同目录文件。临时文件虽然带有合法
-            # 音频扩展名，但尚未完成校验，不能被随机 BGM 列表提前选中。
+            # И предпроверка загрузки, и финальное сохранение ненадолго создают файл в том же
+            # каталоге. У временного файла корректное аудиорасширение, но проверку он ещё не прошёл, и попадать в выбор случайного BGM раньше времени не должен.
             if name.startswith(_INTERNAL_UPLOAD_PREFIX):
                 continue
             if Path(name).suffix.lower() not in SUPPORTED_BGM_EXTENSIONS:
                 continue
             file_path = os.path.join(directory, name)
             try:
-                # 枚举结果同样需要真实路径校验。否则攻击者可在允许目录中放置
-                # 指向外部文件的音频符号链接，再借随机 BGM 路径交给 MoviePy。
+                # Результаты перечисления тоже нуждаются в проверке реального пути: иначе
+                # атакующий положит в разрешённый каталог аудиосимлинк на внешний файл и передаст его в MoviePy через путь случайного BGM.
                 resolved_path = file_security.resolve_path_within_directory(
                     directory, file_path
                 )
@@ -302,11 +323,14 @@ def list_bgm_files() -> list[str]:
 
 def resolve_bgm_file(unsafe_path: str) -> str:
     """
-    在用户上传目录和内置歌曲目录中解析 BGM，并拒绝两个白名单之外的路径。
+    Разрешает путь к BGM в каталоге пользовательских загрузок и в каталоге
+    встроенных композиций, отклоняя всё за пределами этих двух белых списков.
 
-    文件名优先命中用户目录，同时保留 `output000.mp3`、绝对白名单路径和
-    `./resource/songs/output000.mp3` 等旧用法。新上传文件使用 UUID，正常情况下
-    不会与内置歌曲或历史上传发生重名。
+    Имя файла сперва ищется в пользовательском каталоге; при этом сохраняются
+    прежние варианты записи — `output000.mp3`, абсолютный путь из белого списка и
+    `./resource/songs/output000.mp3`. Новые загрузки используют UUID, поэтому в
+    норме не конфликтуют по имени со встроенными композициями и прошлыми
+    загрузками.
     """
     if (
         not unsafe_path

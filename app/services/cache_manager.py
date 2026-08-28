@@ -1,4 +1,4 @@
-"""视频素材缓存的统计、预览和清理服务。"""
+"""Сервис подсчёта, предпросмотра и очистки кэша видеоматериалов."""
 
 from __future__ import annotations
 
@@ -13,15 +13,16 @@ from loguru import logger
 from app.utils import utils
 
 
-# 在线素材使用 URL 的 MD5 作为稳定文件名。缓存管理只接受该命名格式，避免把
-# 用户误放到目录中的视频、说明文件或其它业务文件当作缓存删除。
+# Онлайн-материалы получают устойчивое имя файла из MD5 их URL. Управление кэшем
+# принимает только этот формат имени, чтобы не удалить как кэш видео, заметки
+# или другие рабочие файлы, случайно положенные пользователем в тот же каталог.
 _VIDEO_CACHE_FILE_PATTERN = re.compile(r"^vid-[0-9a-f]{32}\.mp4$")
 _SECONDS_PER_DAY = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
 class VideoCacheStats:
-    """缓存目录的轻量统计结果，只包含文件系统元数据。"""
+    """Лёгкая статистика по каталогу кэша: только метаданные файловой системы."""
 
     file_count: int = 0
     total_size: int = 0
@@ -31,7 +32,7 @@ class VideoCacheStats:
 
 @dataclass(frozen=True)
 class VideoCacheCleanupResult:
-    """一次清理的执行结果，允许部分文件删除失败。"""
+    """Результат одной очистки; часть файлов может не удалиться."""
 
     deleted_count: int = 0
     deleted_size: int = 0
@@ -40,7 +41,7 @@ class VideoCacheCleanupResult:
 
 @dataclass(frozen=True)
 class _VideoCacheEntry:
-    """扫描阶段保存的最小文件信息，避免清理时打开或解析视频。"""
+    """Минимальные сведения о файле, сохранённые при сканировании, чтобы при очистке не открывать и не разбирать видео."""
 
     path: str
     name: str
@@ -49,18 +50,20 @@ class _VideoCacheEntry:
 
 
 def video_cache_dir() -> str:
-    """返回项目管理的默认视频缓存目录。"""
+    """Возвращает каталог кэша видео по умолчанию, которым управляет проект."""
 
     return os.path.realpath(utils.storage_dir("cache_videos"))
 
 
 def _iter_video_cache_entries() -> Iterator[_VideoCacheEntry]:
     """
-    顺序扫描默认缓存目录第一层。
+    Последовательно сканирует первый уровень каталога кэша по умолчанию.
 
-    使用 ``os.scandir`` 是为了在缓存达到数万文件时复用目录遍历返回的元数据，
-    避免 ``Path.iterdir`` 后再次查询文件类型。这里不递归、不打开视频，也不调用
-    FFmpeg，因此耗时主要与文件数量线性相关，而不是与视频总容量相关。
+    ``os.scandir`` выбран, чтобы при десятках тысяч файлов переиспользовать
+    метаданные, которые возвращает обход каталога, и не запрашивать тип файла
+    повторно после ``Path.iterdir``. Рекурсии нет, видео не открываются, FFmpeg
+    не вызывается, поэтому время работы линейно зависит от числа файлов, а не от
+    суммарного объёма видео.
     """
 
     cache_dir = video_cache_dir()
@@ -80,7 +83,7 @@ def _iter_video_cache_entries() -> Iterator[_VideoCacheEntry]:
                 continue
 
             try:
-                # 不跟随符号链接，确保清理逻辑不会越过默认缓存目录边界。
+                # Не идём по симлинкам: логика очистки не должна выходить за границы каталога кэша по умолчанию.
                 if not entry.is_file(follow_symlinks=False):
                     continue
                 stat_result = entry.stat(follow_symlinks=False)
@@ -109,7 +112,7 @@ def _is_cleanup_candidate(
 
 
 def _validate_max_age_days(max_age_days: int | None) -> None:
-    """即使缓存目录为空，也应稳定拒绝无效清理参数。"""
+    """Даже при пустом каталоге кэша некорректные параметры очистки отклоняются предсказуемо."""
     if max_age_days is None:
         return
     if (
@@ -122,10 +125,12 @@ def _validate_max_age_days(max_age_days: int | None) -> None:
 
 def get_video_cache_stats(max_age_days: int | None = None) -> VideoCacheStats:
     """
-    统计全部缓存，或预览修改时间早于指定天数的可清理缓存。
+    Считает весь кэш или показывает предпросмотр записей старше указанного числа
+    дней.
 
-    ``max_age_days=None`` 表示全部缓存。统计过程只读取目录项的大小和修改时间，
-    不读取视频内容，因此即使缓存总容量很大也不会产生与容量成比例的 I/O。
+    ``max_age_days=None`` означает весь кэш. При подсчёте читаются только размер
+    и время изменения элементов каталога, содержимое видео не открывается,
+    поэтому даже большой кэш не даёт I/O, пропорционального объёму.
     """
 
     _validate_max_age_days(max_age_days)
@@ -157,11 +162,15 @@ def get_video_cache_stats(max_age_days: int | None = None) -> VideoCacheStats:
 
 def clean_video_cache(max_age_days: int | None = None) -> VideoCacheCleanupResult:
     """
-    清理默认视频缓存，并返回可向用户展示的汇总结果。
+    Очищает кэш видео по умолчанию и возвращает сводку, пригодную для показа
+    пользователю.
 
-    页面预览与真正点击清理之间可能间隔较久，所以执行时必须重新扫描和判断，
-    不能复用旧候选列表。删除采用逐文件容错：单个文件被占用或权限不足时记录
-    警告并继续，避免几百个文件中一个异常文件导致整次清理失败。
+    Между предпросмотром на странице и реальным нажатием «Очистить» может пройти
+    много времени, поэтому при выполнении список кандидатов пересобирается
+    заново, а старый не переиспользуется. Удаление устойчиво к ошибкам по
+    каждому файлу: если файл занят или не хватает прав, пишется предупреждение и
+    работа продолжается — один проблемный файл из сотен не должен срывать всю
+    очистку.
     """
 
     _validate_max_age_days(max_age_days)
@@ -177,17 +186,17 @@ def clean_video_cache(max_age_days: int | None = None) -> VideoCacheCleanupResul
     failed_count = 0
     cache_dir = video_cache_dir()
 
-    # 边扫描边删除，不在内存中保留完整候选列表。即使目录增长到几十万个文件，
-    # 清理过程的额外内存仍保持常量级；执行时使用统一 now，避免长清理过程中
-    # 截止时间不断移动而产生不可预测的候选范围。
+    # Удаляем по ходу сканирования, не держа в памяти полный список кандидатов. Даже
+    # при сотнях тысяч файлов дополнительная память остаётся константной. Используем
+    # единое значение now, чтобы за время долгой очистки граница отсечения не поехала и набор кандидатов не стал непредсказуемым.
     for entry in _iter_video_cache_entries():
         if not _is_cleanup_candidate(entry, max_age_days, now):
             continue
         candidate_count += 1
         candidate_size += entry.size
         try:
-            # entry.path 来自默认目录的第一层 scandir；删除前再次校验父目录和
-            # 文件名，防止未来修改扫描逻辑时意外扩大可删除范围。
+            # entry.path приходит из scandir по первому уровню каталога по умолчанию. Перед
+            # удалением ещё раз проверяем родительский каталог и имя файла, чтобы будущая правка логики сканирования случайно не расширила круг удаляемого.
             if (
                 os.path.realpath(os.path.dirname(entry.path)) != cache_dir
                 or not _VIDEO_CACHE_FILE_PATTERN.fullmatch(entry.name)
