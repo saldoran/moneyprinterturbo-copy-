@@ -323,8 +323,8 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
     if source not in SUPPORTED_SOURCES:
         raise SkillError(f"unsupported video source: {source}")
     if source == "volcengine_seedance":
-        # 与运行时 Provider 保持完全一致的凭据优先级，避免 Skill 预检通过后
-        # 主程序却读取了另一把 Key。ARK_API_KEY 语义过于宽泛，明确不再兼容。
+        # Приоритет учётных данных в точности совпадает с рантайм-провайдером: иначе
+        # предпроверка Skill пройдёт, а основная программа прочитает другой ключ. Семантика ARK_API_KEY слишком широкая, совместимость с ней явно прекращена.
         value = (
             _plain_config_value(text, "volcengine_seedance_api_key")
             or os.environ.get("VOLCENGINE_ARK_API_KEY", "").strip()

@@ -24,10 +24,12 @@ TASK_HISTORY_CONSTANTS = {
 
 def _load_task_history_helpers():
     """
-    从 WebUI 入口中隔离加载不依赖 Streamlit 的任务历史纯函数。
+    Изолированно подгружает из точки входа WebUI чистые функции истории задач,
+    не зависящие от Streamlit.
 
-    直接导入 Main.py 会执行整套页面渲染。测试只编译目标常量和函数，既验证
-    合并后的真实实现，也避免为了单元测试重新拆出一个只有少量函数的生产模块。
+    Прямой импорт Main.py запускает отрисовку всей страницы. Тест компилирует
+    только нужные константы и функции: так проверяется реальная реализация и не
+    приходится ради юнит-тестов выносить отдельный модуль из пары функций.
     """
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     selected_nodes = []
@@ -58,7 +60,7 @@ get_unmet_restore_upload_requirements = TASK_HISTORY_NAMESPACE[
 
 
 def test_find_final_task_video_ignores_intermediate_files(tmp_path):
-    """任务历史只能把 final 成片识别为完成，不能使用合成中间文件。"""
+    """История задач считает завершённым только финальный ролик, а не промежуточные файлы монтажа."""
     for file_name in (
         "combined-1.mp4",
         "temp-clip-1.mp4",
@@ -70,7 +72,7 @@ def test_find_final_task_video_ignores_intermediate_files(tmp_path):
 
 
 def test_find_final_task_video_returns_first_numbered_output(tmp_path):
-    """多成片任务与运行时结果保持一致，默认播放序号最小的最终视频。"""
+    """Для задач с несколькими роликами поведение совпадает с рантаймом: по умолчанию проигрывается финальное видео с наименьшим номером."""
     (tmp_path / "final-10.mp4").touch()
     (tmp_path / "final-2.mp4").touch()
     (tmp_path / "final-1.mp4").touch()
@@ -126,7 +128,7 @@ def test_restore_requirements_allow_explicit_replacements():
 
 
 def test_restore_requirements_require_file_in_upload_voice_mode():
-    """恢复上传配音任务时，继续使用上传模式必须重新选择音频文件。"""
+    """При восстановлении задачи с загруженной озвучкой режим загрузки требует заново выбрать аудиофайл."""
     requirements = build_restore_upload_requirements(
         {
             "video_source": "pexels",
@@ -146,7 +148,7 @@ def test_restore_requirements_require_file_in_upload_voice_mode():
 
 
 def test_restore_requirements_allow_replacing_upload_with_other_voice_modes():
-    """用户主动切换到自动配音或无配音时，不再强制恢复历史上传文件。"""
+    """Если пользователь сам переключился на автоозвучку или её отсутствие, ранее загруженный файл больше не восстанавливается принудительно."""
     requirements = build_restore_upload_requirements(
         {
             "video_source": "pexels",

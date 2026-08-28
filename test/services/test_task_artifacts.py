@@ -23,7 +23,7 @@ class TestTaskArtifacts(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_patch_preserves_existing_script_fields(self):
-        """补充素材来源时不能覆盖历史任务恢复依赖的文案、关键词和参数。"""
+        """Добавление источника материалов не должно затирать текст, ключевые слова и параметры, от которых зависит восстановление прошлых задач."""
         original = {
             "script": "existing script",
             "search_terms": ["nature"],
@@ -51,7 +51,7 @@ class TestTaskArtifacts(unittest.TestCase):
         self.assertEqual(list(self.task_dir.glob(".script.json.*.tmp")), [])
 
     def test_write_script_data_serializes_video_params(self):
-        """原子写入替换旧实现后，仍需完整兼容任务主流程传入的 Pydantic 参数。"""
+        """После замены старой реализации атомарной записью нужна полная совместимость с Pydantic-параметрами из основного потока задачи."""
         params = VideoParams(
             video_subject="test subject",
             video_terms=["city", "night"],
@@ -72,7 +72,7 @@ class TestTaskArtifacts(unittest.TestCase):
         self.assertEqual(payload["params"]["video_source"], "pexels")
 
     def test_patch_missing_script_is_non_blocking(self):
-        """独立调用素材下载时没有任务清单，应静默跳过而不是创建残缺 JSON。"""
+        """При отдельном вызове загрузки материалов манифеста задачи нет — шаг нужно молча пропустить, а не создавать битый JSON."""
         updated = task_artifacts.patch_script_data(
             "standalone",
             material_sources=[],
@@ -82,7 +82,7 @@ class TestTaskArtifacts(unittest.TestCase):
         self.assertFalse((self.task_dir / "script.json").exists())
 
     def test_patch_invalid_script_returns_false_without_overwrite(self):
-        """历史 JSON 损坏时必须保留原文件、记录错误，并允许视频主流程继续。"""
+        """При повреждённом историческом JSON исходный файл сохраняется, ошибка логируется, а основной поток генерации видео продолжается."""
         target = self.task_dir / "script.json"
         target.write_text("{invalid-json", encoding="utf-8")
 

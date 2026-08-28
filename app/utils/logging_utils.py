@@ -13,23 +13,27 @@ LOG_RECORD_FORMAT = (
     '"{file.path}:{line}":<blue> {function}</> '
     "- <level>{message}</>\n"
 )
-# Loguru 启动时默认终端 handler 的 ID 为 0。WebUI 重新加载时只能替换这个
-# 基础终端输出，不能调用 logger.remove() 清空全部 handler，否则正在运行任务
-# 用于收集 WebUI 日志的临时 sink 也会被删除。
+# При старте Loguru ID терминального handler по умолчанию равен 0. При
+# перезагрузке WebUI можно заменить только этот базовый вывод в терминал;
+# вызывать logger.remove() и стирать все handler нельзя, иначе удалится и
+# временный sink, которым выполняющаяся задача собирает логи для WebUI.
 _terminal_handler_id: int | None = 0
 _terminal_handler_lock = threading.RLock()
 
 
 def _project_relative_path(file_path):
     """
-    把绝对路径缩短为 ``./`` 开头、始终使用正斜杠的项目相对路径。
+    Сокращает абсолютный путь до относительного пути проекта, который начинается
+    с ``./`` и всегда использует прямые слэши.
 
-    Windows 上项目可能通过映射网络盘或 ``subst`` 盘启动。此时调用栈里的路径
-    仍是 ``X:\\MoneyPrinterTurbo\\...``，而 ``PROJECT_ROOT`` 经 ``realpath``
-    解析后落在 ``C:\\...``，``os.path.relpath`` 会直接抛出 ``ValueError``。
-    格式化函数抛错会被 loguru 捕获并丢弃整条记录，终端和 WebUI 日志面板会
-    同时变空，因此这里必须兜底返回原始路径。项目目录之外的文件同理：把
-    ``./`` 拼到 ``..`` 回溯路径上只会得到更难读的结果。
+    В Windows проект может быть запущен с примонтированного сетевого диска или
+    диска ``subst``. Тогда путь в стеке вызовов остаётся видом
+    ``X:\\MoneyPrinterTurbo\\...``, а ``PROJECT_ROOT`` после ``realpath``
+    оказывается в ``C:\\...``, и ``os.path.relpath`` сразу бросает ``ValueError``.
+    Исключение в функции форматирования loguru перехватит и выбросит запись
+    целиком — терминал и панель логов WebUI опустеют одновременно, поэтому здесь
+    обязателен откат к исходному пути. С файлами вне каталога проекта то же самое:
+    приклеивание ``./`` к пути с ``..`` даёт только менее читаемый результат.
     """
     try:
         relative_path = os.path.relpath(file_path, PROJECT_ROOT)
@@ -37,36 +41,41 @@ def _project_relative_path(file_path):
         return file_path
     if relative_path == os.pardir or relative_path.startswith(os.pardir + os.sep):
         return file_path
-    # Windows 的 relpath 返回反斜杠分隔的路径，直接拼接会得到 ``./app\\utils``
-    # 这种混合分隔符的输出，与其它平台的日志不一致。
+    # В Windows relpath возвращает путь с обратными слэшами, и прямая склейка даёт
+    # смесь разделителей вида ``./app\\utils``, что расходится с логами на других платформах.
     return f"./{relative_path.replace(os.sep, '/')}"
 
 
 def format_log_record(record):
     """
-    统一格式化终端与 WebUI 日志。
+    Единообразно форматирует логи терминала и WebUI.
 
-    Loguru 会把同一条记录交给多个 sink。第一个 sink 可能已经将绝对路径转换
-    为项目相对路径，因此这里同时兼容绝对路径和 ``./`` 开头的已格式化路径。
-    WebUI sink 会关闭颜色，但时间、级别、调用位置和消息内容与终端保持一致。
+    Loguru отдаёт одну и ту же запись нескольким sink. Первый sink мог уже
+    превратить абсолютный путь в относительный путь проекта, поэтому здесь
+    поддерживаются и абсолютные пути, и уже отформатированные, начинающиеся
+    с ``./``. Sink WebUI отключает цвет, но время, уровень, место вызова и текст
+    сообщения совпадают с терминалом.
     """
     file_path = record["file"].path
     if os.path.isabs(file_path):
         record["file"].path = _project_relative_path(file_path)
 
-    # 日志消息有时会包含任务文件的绝对路径。统一缩短为项目相对路径，可以
-    # 避免 WebUI 和终端因初始化入口不同而展示两套内容。
+    # В сообщении лога иногда встречается абсолютный путь к файлу задачи. Единое
+    # сокращение до пути относительно проекта не даёт WebUI и терминалу показывать разное из-за отличий в точке инициализации.
     record["message"] = record["message"].replace(PROJECT_ROOT, ".")
     return LOG_RECORD_FORMAT
 
 
 def configure_terminal_logger(sink, level: str, colorize: bool = True) -> int:
     """
-    安全替换进程级终端日志 handler，并保留任务专用 handler。
+    Безопасно заменяет общепроцессный терминальный handler логов, сохраняя
+    handler отдельных задач.
 
-    Streamlit 在代码热重载或缓存失效时可能重新执行日志初始化。这里只按已记录
-    的 handler ID 精确移除旧终端输出，因此不会中断后台任务正在写入的 WebUI
-    日志。锁用于保护多个浏览器会话同时初始化时的 ID 更新。
+    При горячей перезагрузке кода или сбросе кэша Streamlit может заново
+    выполнить инициализацию логирования. Здесь старый вывод в терминал удаляется
+    точно по сохранённому ID handler, поэтому логи WebUI, которые пишет фоновая
+    задача, не прерываются. Лок защищает обновление ID, когда инициализация идёт
+    сразу из нескольких сессий браузера.
     """
     global _terminal_handler_id
 
@@ -75,8 +84,8 @@ def configure_terminal_logger(sink, level: str, colorize: bool = True) -> int:
             try:
                 logger.remove(_terminal_handler_id)
             except ValueError:
-                # 测试或外部入口可能已经移除该 handler。继续创建新的终端输出，
-                # 不需要影响其它仍有效的日志 sink。
+                # Тест или внешняя точка входа могли уже удалить этот handler. Продолжаем
+                # создавать новый вывод в терминал, не затрагивая остальные ещё живые sink.
                 pass
 
         _terminal_handler_id = logger.add(

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import config
 
-# 忽略 Pydantic 的特定警告
+# Игнорируем отдельные предупреждения Pydantic
 warnings.filterwarnings(
     "ignore",
     category=UserWarning,
@@ -57,9 +57,11 @@ class MaterialInfo:
     provider: str = "pexels"
     url: str = ""
     duration: int = 0
-    # 在线素材搜索会附带经过筛选的公开来源信息，供搜索缓存和任务记录复用。
-    # 本地上传素材不需要填写；写入任务文件前仍会按字段白名单重新构造，
-    # 避免外部请求传入的签名 URL、凭据或无关字段进入持久化数据。
+    # Онлайн-поиск материалов отдаёт отфильтрованные сведения о публичном источнике:
+    # их переиспользуют кэш поиска и запись задачи. Для локально загруженных
+    # материалов поле не нужно. Перед записью в файл задачи объект пересобирается
+    # по белому списку полей, чтобы подписанные URL, учётные данные и посторонние
+    # поля из внешних запросов не попали в постоянное хранилище.
     source_info: Optional[dict[str, Any]] = None
 
 
@@ -105,8 +107,8 @@ class VideoParams(BaseModel):
     bgm_type: Optional[str] = "random"
     bgm_file: Optional[str] = ""
     bgm_volume: Optional[float] = 0.2
-    # 视频配乐供应商共用提示词，WebUI 新任务统一写入该字段。保留下面的
-    # Sonilo 专用字段以兼容旧任务记录和现有 CLI 参数。
+    # Общий промпт для поставщиков музыки: новые задачи из WebUI пишут именно это поле.
+    # Отдельное поле Sonilo сохранено ради совместимости со старыми записями задач и текущими параметрами CLI.
     video_music_prompt: str = Field(default="", max_length=2000)
     sonilo_bgm_prompt: str = Field(default="", max_length=2000)
 
@@ -249,7 +251,7 @@ class TaskResponseData(BaseModel):
 
 
 class TaskStatusData(BaseModel):
-    """任务查询对外保证的稳定字段；历史和扩展字段继续原样透传。"""
+    """Стабильные поля, которые запрос задачи гарантирует наружу; исторические и расширенные поля пробрасываются как есть."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -268,7 +270,7 @@ class TaskStatusData(BaseModel):
 
 
 class TaskListData(BaseModel):
-    """分页任务列表结构。"""
+    """Структура постраничного списка задач."""
 
     tasks: List[TaskStatusData]
     total: int
@@ -331,10 +333,11 @@ class TaskResponse(BaseResponse):
 
 class TaskQueryResponse(BaseResponse):
     """
-    任务查询会返回生成状态和可选的跨平台发布状态。
+    Запрос задачи возвращает статус генерации и, опционально, статус кросспостинга.
 
-    生成失败时包含 `failed_stage` 和 `error`；生成完成后如果启用了自动发布，
-    `cross_post_state` 会依次进入 pending、processing、complete 或 failed。
+    При ошибке генерации присутствуют `failed_stage` и `error`. После успешной
+    генерации, если включена автопубликация, `cross_post_state` последовательно
+    принимает значения pending, processing, complete или failed.
     """
 
     data: TaskStatusData
@@ -371,7 +374,7 @@ class TaskQueryResponse(BaseResponse):
 
 
 class TaskListResponse(BaseResponse):
-    """任务列表使用独立响应模型，避免与单任务查询混用文档结构。"""
+    """У списка задач отдельная модель ответа, чтобы не смешивать структуру документации с запросом одной задачи."""
 
     data: TaskListData
 

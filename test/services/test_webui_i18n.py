@@ -18,8 +18,10 @@ PROVIDER_TIPS_PREFIXES = (
     LLM_PROVIDER_TIPS_PREFIX,
     TTS_PROVIDER_TIPS_PREFIX,
 )
-# 合作 Provider 的品牌名和长说明只维护中英文。次要 locale 统一回退英文，
-# 避免把完全相同的品牌名复制十份，也避免长说明后续只更新部分语言。
+# Названия брендов партнёрских провайдеров и длинные описания поддерживаются
+# только на китайском и английском. Второстепенные локали единообразно откатываются
+# на английский: незачем копировать одно и то же название десять раз и рисковать
+# тем, что длинное описание обновят лишь в части языков.
 ENGLISH_FALLBACK_KEYS = frozenset(
     {
         "AI Video Quote Required",
@@ -86,7 +88,7 @@ def _load_translation(locale):
 
 
 def _required_translation_keys(translations):
-    """返回二级语言必须维护的 key，Provider 长说明统一回退英文。"""
+    """Возвращает ключи, обязательные для второстепенных языков; длинные описания провайдеров откатываются на английский."""
     return {
         key
         for key in translations
@@ -96,12 +98,12 @@ def _required_translation_keys(translations):
 
 
 def _format_placeholders(value):
-    """提取运行时格式化变量，防止翻译遗漏或误改变量名。"""
+    """Извлекает переменные форматирования, чтобы перевод их не потерял и не переименовал."""
     return set(FORMAT_PLACEHOLDER_PATTERN.findall(value))
 
 
 def _markdown_urls(value):
-    """提取 Markdown 链接目标，允许翻译链接文字但不允许改坏地址。"""
+    """Извлекает цели Markdown-ссылок: текст ссылки переводить можно, ломать адрес — нет."""
     return set(MARKDOWN_URL_PATTERN.findall(value))
 
 
@@ -144,7 +146,7 @@ class TestWebuiI18n(unittest.TestCase):
         self.assertEqual(sorted(visitor.keys - en_keys), [])
 
     def test_shengsuanyun_provider_tips_keep_registration_and_model_links(self):
-        """合作入口和模型目录属于产品配置，避免后续改文案时误删追踪链接。"""
+        """Партнёрские точки входа и каталог моделей — продуктовая конфигурация; правка текстов не должна случайно удалить трекинговые ссылки."""
         expected_urls = {
             "https://www.shengsuanyun.com/?from=CH_XUQ4OTSK",
             "https://global.modelmesh.info/model",
@@ -171,8 +173,8 @@ class TestWebuiI18n(unittest.TestCase):
                 self.assertEqual(sorted(required_en_keys - locale_keys), [])
 
     def test_secondary_locales_do_not_duplicate_provider_tips(self):
-        # Provider 配置长说明只维护中英文，其它语言运行时回退英文。
-        # 禁止复制这些 key，避免出现不会持续维护的半翻译内容。
+        # Длинные описания настроек провайдеров поддерживаются только на китайском и
+        # английском, остальные языки в рантайме откатываются на английский. Копировать эти ключи запрещено, иначе появится полупереведённый контент без поддержки.
         for locale in SECONDARY_LOCALES:
             with self.subTest(locale=locale):
                 locale_keys = set(_load_translation(locale))

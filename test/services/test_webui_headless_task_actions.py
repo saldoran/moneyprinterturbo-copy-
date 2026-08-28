@@ -15,9 +15,10 @@ WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
 
 @pytest.fixture
 def headless_task_app(tmp_path, monkeypatch):
-    # 使用独立任务目录避免读取或修改开发者的真实生成记录。测试文件只需要被
-    # Streamlit 注册为媒体资源，不参与视频解码，因此无需在单元测试中调用
-    # FFmpeg 生成素材，能够稳定覆盖无桌面服务器的 UI 分支。
+    # Отдельный каталог задач не даёт читать или менять реальные записи генерации
+    # разработчика. Тестовому файлу достаточно быть зарегистрированным в Streamlit
+    # как медиаресурс, декодирование видео не требуется — значит, в юнит-тесте не
+    # нужен FFmpeg, и ветка UI для сервера без графического окружения покрывается стабильно.
     tasks_dir = tmp_path / "storage" / "tasks"
     task_dir = tasks_dir / "headless-test"
     task_dir.mkdir(parents=True)
@@ -30,8 +31,8 @@ def headless_task_app(tmp_path, monkeypatch):
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
 
-    # AppTest 会多次重新执行页面脚本；配置保存必须在整个测试生命周期内保持
-    # 隔离，防止控件初始化意外写入开发者的 config.toml。
+    # AppTest несколько раз перезапускает скрипт страницы, поэтому сохранение
+    # конфигурации должно быть изолировано на весь жизненный цикл теста: инициализация виджетов не должна случайно записать в config.toml разработчика.
     with patch.object(config, "try_save_config", return_value=True):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=60)
         app.run()

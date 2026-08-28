@@ -12,7 +12,7 @@ from app.utils import utils
 class TestTaskStaticFiles(unittest.TestCase):
     def setUp(self):
         self.original_app_config = dict(config.app)
-        # 普通静态文件测试验证默认开放模式，不能依赖开发者本机是否启用了 Key。
+        # Тест обычной статики проверяет открытый режим по умолчанию и не должен зависеть от того, включён ли ключ на машине разработчика.
         config.app["api_key"] = ""
         self.client = TestClient(asgi.app)
 
@@ -34,7 +34,7 @@ class TestTaskStaticFiles(unittest.TestCase):
         self.assertEqual(response.text, "task artifact")
 
     def test_configured_key_protects_task_file(self):
-        """配置 Key 后，任务文件必须拒绝缺失或错误凭据，只接受正确请求头。"""
+        """После настройки ключа файлы задач отклоняют отсутствующие и неверные учётные данные, принимая только корректный заголовок."""
 
         config.app["api_key"] = "task-file-secret"
         with tempfile.TemporaryDirectory(
@@ -61,7 +61,7 @@ class TestTaskStaticFiles(unittest.TestCase):
         self.assertEqual(accepted.text, "protected task artifact")
 
     def test_configured_key_does_not_protect_health_or_docs(self):
-        """健康检查和 Swagger 文档保持公开，方便部署探针与人工配置。"""
+        """Health-check и документация Swagger остаются публичными — так удобнее для проб развёртывания и ручной настройки."""
 
         config.app["api_key"] = "task-file-secret"
 
@@ -69,7 +69,7 @@ class TestTaskStaticFiles(unittest.TestCase):
         self.assertEqual(self.client.get("/docs").status_code, 200)
 
     def test_options_request_is_left_to_cors_middleware(self):
-        """受保护文件的 CORS 预检不应被 API Key 校验提前拒绝。"""
+        """Предполётный CORS-запрос к защищённому файлу не должен отклоняться проверкой API-ключа раньше времени."""
 
         config.app["api_key"] = "task-file-secret"
 

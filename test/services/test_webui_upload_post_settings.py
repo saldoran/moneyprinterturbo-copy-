@@ -17,9 +17,9 @@ def _widget_by_key(elements, key):
 
 
 def test_webui_upload_post_setup_guide_links_to_required_pages():
-    # 首次使用自动发布时，API Key 和发布用户需要在 Upload-Post 的不同页面
-    # 分别配置。这里锁定两个精确入口，避免后续文案调整后再次退化成无法点击的
-    # 泛化提示，导致用户误把登录邮箱当作发布用户名称。
+    # При первом использовании автопубликации API-ключ и пользователь публикации
+    # настраиваются на разных страницах Upload-Post. Фиксируем две точные ссылки,
+    # чтобы правка текстов снова не свела их к общей некликабельной подсказке, из-за которой пользователь принимает почту для входа за имя пользователя публикации.
     with patch.object(config, "try_save_config", return_value=True):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=60)
         app.run()
