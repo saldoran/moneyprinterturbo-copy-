@@ -23,11 +23,14 @@ _api_key_lock = threading.Lock()
 
 def _safe_public_url(value: Any) -> str | None:
     """
-    只保留可公开展示的 HTTP(S) 页面地址，并移除查询参数和凭据。
+    Оставляет только публично отображаемый адрес страницы HTTP(S), убирая
+    параметры запроса и учётные данные.
 
-    素材下载地址可能携带 API Key、签名 JWT 或临时 token。任务清单只需要
-    帮助用户回到供应商的公开素材页，不应保存鉴权参数；用户信息形式的 URL
-    同样拒绝，避免 ``https://user:pass@example.com`` 一类内容落盘。
+    Адрес скачивания материала может нести API-ключ, подписанный JWT или временный
+    токен. Манифесту задачи нужно лишь помочь пользователю вернуться на публичную
+    страницу материала у поставщика, и параметры аутентификации хранить незачем.
+    URL с данными пользователя тоже отклоняются, чтобы на диск не попало что-то
+    вроде ``https://user:pass@example.com``.
     """
     if not isinstance(value, str) or not value.strip():
         return None
@@ -47,7 +50,7 @@ def _safe_public_url(value: Any) -> str | None:
 
 
 def _creator_info(value: Any) -> dict[str, str] | None:
-    """从不同供应商的作者结构中提取统一的公开字段。"""
+    """Извлекает единообразный набор публичных полей из структур автора у разных поставщиков."""
     if isinstance(value, str) and value.strip():
         return {"name": value.strip()}
     if not isinstance(value, dict):
@@ -70,11 +73,14 @@ def _creator_info(value: Any) -> dict[str, str] | None:
 
 def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, Any]:
     """
-    为成功下载的素材生成轻量来源记录。
+    Формирует лёгкую запись об источнике успешно скачанного материала.
 
-    ``source_info`` 可能来自缓存，甚至来自外部构造的 ``MaterialInfo``，因此
-    不能原样写入。这里按白名单重新构造，只保留公开页面、业务标识和尺寸，
-    并只记录本地文件名，避免用户目录或 Docker 挂载路径进入任务文件。
+    ``source_info`` может прийти из кэша и даже из внешне собранного
+    ``MaterialInfo``, поэтому записывать его как есть нельзя. Здесь объект
+    пересобирается по белому списку: остаются только публичная страница,
+    бизнес-идентификатор и размеры, а из локального пути сохраняется лишь имя
+    файла — так каталог пользователя и точки монтирования Docker не попадут в файл
+    задачи.
     """
     source = item.source_info if isinstance(item.source_info, dict) else {}
     record: dict[str, Any] = {
@@ -114,11 +120,15 @@ def _persist_material_sources(
     material_sources: list[dict[str, Any]],
 ) -> None:
     """
-    将当前实际下载成功的素材来源补充到任务清单。
+    Дополняет манифест задачи источниками материалов, которые действительно
+    удалось скачать.
 
-    任务记录是辅助能力，不能改变视频下载函数的返回值，也不能因为写盘失败
-    中断成片主流程。``patch_script_data`` 会负责原子替换和异常日志；这里仅在
-    成功后记录数量，便于确认任务追溯信息是否已经落盘。
+    Запись в задачу — вспомогательная возможность: она не вправе менять
+    возвращаемое значение функции загрузки видео и не должна прерывать основной
+    процесс сборки из-за неудачной записи на диск. Атомарную подмену и лог
+    исключений берёт на себя ``patch_script_data``; здесь после успеха лишь
+    фиксируется количество, чтобы подтвердить, что сведения для отслеживания
+    задачи легли на диск.
     """
     try:
         saved = task_artifacts.patch_script_data(
@@ -131,8 +141,8 @@ def _persist_material_sources(
                 f"task_id={task_id}, count={len(material_sources)}"
             )
     except Exception as exc:
-        # task_artifacts 自身已经按失败降级设计，这里仍保留最后一道隔离，
-        # 防止未来实现调整或目录解析异常意外影响素材下载返回值。
+        # task_artifacts сам спроектирован на мягкую деградацию при сбоях, но здесь
+        # остаётся последний слой изоляции: будущая правка реализации или ошибка разрешения каталога не должны неожиданно повлиять на возвращаемое значение загрузки материалов.
         logger.warning(
             "failed to persist material source records: "
             f"task_id={task_id}, error={type(exc).__name__}, detail={exc}"
@@ -140,9 +150,10 @@ def _persist_material_sources(
 
 
 def _get_tls_verify() -> bool:
-    # 默认开启 TLS 证书校验，防止素材搜索和下载过程被中间人篡改。
-    # 仅在企业代理、自签证书等明确需要的场景下，允许用户通过
-    # `config.toml` 显式设置 `tls_verify = false` 临时关闭。
+    # Проверка TLS-сертификата включена по умолчанию, чтобы поиск и загрузку
+    # материалов нельзя было подменить атакой «человек посередине». Отключить её
+    # временно можно только явно, через `tls_verify = false` в `config.toml`, и только
+    # в понятных сценариях вроде корпоративного прокси или самоподписанного сертификата.
     tls_verify = config.app.get("tls_verify", True)
     if isinstance(tls_verify, str):
         tls_verify = tls_verify.strip().lower() not in ("0", "false", "no", "off")
@@ -176,11 +187,12 @@ def get_api_key(cfg_key: str):
 
 def _redact_secret(message: str, secret: str) -> str:
     """
-    对即将写入日志的异常文本做最小范围脱敏。
+    Минимально маскирует текст исключения перед записью в лог.
 
-    requests 的连接异常可能包含完整请求 URL，而 Pixabay API Key 通过查询
-    参数传递。这里同时替换原始值和 URL 编码值，既保留网络错误信息用于排查，
-    又避免密钥进入日志文件。
+    Исключения соединения в requests могут содержать полный URL запроса, а
+    API-ключ Pixabay передаётся параметром запроса. Здесь заменяются и исходное
+    значение, и его URL-кодированная форма: сведения о сетевой ошибке для разбора
+    сохраняются, а ключ в файл лога не попадает.
     """
     safe_message = str(message)
     if not secret:
@@ -195,10 +207,13 @@ def _redact_secret(message: str, secret: str) -> str:
 
 def _redact_request_error(error: Exception, *secrets: str) -> str:
     """
-    保留网络异常的可排查信息，同时移除 API Key 和代理凭据。
+    Сохраняет пригодные для разбора сведения о сетевом сбое, убирая API-ключ и
+    учётные данные прокси.
 
-    直接只记录异常类型会丢失 DNS、证书、超时等关键上下文；直接记录原始异常
-    又可能回显完整请求 URL。统一入口可以让三个素材供应商使用相同脱敏规则。
+    Записывать один лишь тип исключения — значит потерять важный контекст: DNS,
+    сертификат, таймаут. Записывать исходное исключение целиком — значит рискнуть
+    отразить полный URL запроса. Единая точка входа позволяет всем трём
+    поставщикам материалов использовать одни правила маскирования.
     """
     safe_message = str(error)
     for secret in secrets:
@@ -210,11 +225,12 @@ def _redact_request_error(error: Exception, *secrets: str) -> str:
 
 def _is_cloudflare_challenge(response: requests.Response) -> bool:
     """
-    识别 Cloudflare 返回的 HTML Challenge，而不是把它当成 Pixabay JSON。
+    Распознаёт HTML-челлендж от Cloudflare, чтобы не принять его за JSON Pixabay.
 
-    Cloudflare 通常会设置 `cf-mitigated: challenge`；部分部署只返回带有
-    "Just a moment" 或 challenge-platform 的 HTML，因此保留内容特征兜底。
-    响应正文仅在内存中判断，不写入日志，避免记录无价值的大段 HTML。
+    Cloudflare обычно ставит `cf-mitigated: challenge`; часть развёртываний
+    возвращает только HTML со словами "Just a moment" или challenge-platform,
+    поэтому запасная проверка по содержимому сохранена. Тело ответа проверяется
+    лишь в памяти и в лог не пишется, чтобы не сохранять бесполезные простыни HTML.
     """
     headers = getattr(response, "headers", {}) or {}
     if str(headers.get("cf-mitigated", "")).lower() == "challenge":
@@ -236,11 +252,13 @@ def _matches_video_aspect(
     is_vertical: Any = None,
 ) -> bool:
     """
-    判断远端素材是否与目标画面方向一致。
+    Определяет, совпадает ли ориентация удалённого материала с целевой.
 
-    Pexels、Pixabay 和 Coverr 的响应字段并不统一，因此先使用宽高做可靠判断；
-    Coverr 部分历史响应缺少尺寸时，再使用明确的 ``is_vertical`` 布尔值兜底。
-    无法确认方向的素材直接跳过，避免竖屏任务混入横屏素材并在成片中产生黑边。
+    Поля ответов у Pexels, Pixabay и Coverr не совпадают, поэтому сперва делается
+    надёжный вывод по ширине и высоте; если в части исторических ответов Coverr
+    размеров нет, используется явное булево ``is_vertical``. Материалы, ориентацию
+    которых подтвердить не удалось, пропускаются: иначе в вертикальную задачу
+    попадёт горизонтальный материал и в готовом ролике появятся чёрные поля.
     """
     aspect = VideoAspect(video_aspect)
     try:
@@ -267,16 +285,19 @@ def _filter_materials_by_aspect(
     video_aspect: VideoAspect,
 ) -> List[MaterialInfo]:
     """
-    对缓存结果再次校验方向。
+    Повторно проверяет ориентацию для результатов из кэша.
 
-    素材搜索缓存最长保留 24 小时，升级前写入的缓存可能包含方向不匹配的素材。
-    在统一缓存入口过滤可以让修复立即生效，也能防御第三方 Provider 或旧缓存
-    遗漏远端筛选。无法读取 rendition 尺寸的旧条目按未验证处理并跳过。
+    Кэш поиска материалов живёт до 24 часов, и в записанном до обновления кэше
+    могут оказаться материалы неподходящей ориентации. Фильтрация в единой точке
+    входа в кэш даёт исправлению немедленный эффект и защищает от того, что
+    сторонний провайдер или старый кэш пропустили фильтр на удалённой стороне.
+    Старые записи, у которых не читаются размеры rendition, считаются
+    непроверенными и пропускаются.
     """
     aspect = VideoAspect(video_aspect)
     if aspect == VideoAspect.square:
-        # Pixabay 和 Coverr 很少提供原生方形素材。方形输出沿用既有行为，
-        # 接受可用候选并交给视频合成阶段裁剪，避免升级后 1:1 任务无素材。
+        # Pixabay и Coverr редко дают квадратные материалы в исходном виде. Для
+        # квадратного вывода сохраняем прежнее поведение: принимаем пригодных кандидатов и обрезаем на этапе сборки видео, чтобы после обновления задачи 1:1 не остались без материалов.
         return list(items)
 
     filtered_items = []
@@ -459,8 +480,8 @@ def search_videos_pixabay(
                     h = int(video["height"])
                 except (KeyError, TypeError, ValueError):
                     continue
-                # Pixabay 很少返回原生方形视频；1:1 输出继续接受满足分辨率的
-                # 候选并由合成阶段裁剪。横竖屏则必须严格匹配目标方向。
+                # Pixabay редко возвращает изначально квадратное видео; для вывода 1:1
+                # продолжаем принимать кандидатов, проходящих по разрешению, и обрезаем на этапе сборки. Для горизонтали и вертикали ориентация обязана совпадать строго.
                 orientation_matches = aspect == VideoAspect.square or (
                     _matches_video_aspect(w, h, aspect)
                 )
@@ -511,18 +532,19 @@ def search_videos_coverr(
     subject to Coverr license terms (https://coverr.co/license).
 
     Coverr API notes (based on official docs at api.coverr.co/docs/):
-      - 鉴权: Authorization: Bearer <api_key>
-      - 搜索端点: GET /videos?query=...,响应结构 {"hits": [...], ...}
-      - 加 ?urls=true 在搜索响应里直接返回 mp4 直链
-      - URL 是 signed JWT(绑定 API key,无过期时间)
-      - Coverr 支持通过 filter=is_vertical:true/false 筛选横竖屏素材；
-        响应返回后仍根据 max_width/max_height 或 is_vertical 做本地校验
-      - duration 字段同时存在 number 和 string 两种形态,本函数都接受
+      - аутентификация: Authorization: Bearer <api_key>
+      - эндпоинт поиска: GET /videos?query=..., структура ответа {"hits": [...], ...}
+      - с ?urls=true в ответе поиска сразу приходят прямые ссылки на mp4
+      - URL — это подписанный JWT (привязан к API-ключу, без срока действия)
+      - Coverr умеет фильтровать горизонталь и вертикаль через
+        filter=is_vertical:true/false; после ответа всё равно выполняется
+        локальная проверка по max_width/max_height или is_vertical
+      - поле duration встречается и числом, и строкой — функция принимает оба вида
 
-    本函数使用 urls.mp4_download 字段作为下载地址 —— 按 Coverr 官方文档
-    (https://api.coverr.co/docs/videos/#download-a-video) 的说法,
-    GET 这个 URL 本身就被 Coverr 当作一次合法的 download 事件计入统计,
-    无需再调用 PATCH /videos/:id/stats/downloads。
+    Адресом скачивания служит поле urls.mp4_download: по официальной документации
+    Coverr (https://api.coverr.co/docs/videos/#download-a-video) сам GET по этому
+    URL Coverr засчитывает как полноценное событие download в статистике, поэтому
+    дополнительно вызывать PATCH /videos/:id/stats/downloads не нужно.
     """
     aspect = VideoAspect(video_aspect)
     api_key = get_api_key("coverr_api_keys")
@@ -533,8 +555,8 @@ def search_videos_coverr(
         "urls": "true",
         "sort": "popular",
     }
-    # 服务端方向筛选可以直接从完整搜索结果中返回目标素材，避免先取热门结果再
-    # 本地过滤导致竖屏候选为空。方形素材没有对应布尔条件，继续依赖本地宽高校验。
+    # Фильтрация по ориентации на стороне сервиса позволяет сразу получить нужные
+    # материалы из полной выдачи, а не брать сперва популярные результаты и отсеивать локально, оставшись без вертикальных кандидатов. Для квадрата подходящего булева условия нет, поэтому опираемся на локальную проверку ширины и высоты.
     if aspect == VideoAspect.portrait:
         params["filter"] = "is_vertical:true"
     elif aspect == VideoAspect.landscape:
@@ -558,7 +580,7 @@ def search_videos_coverr(
             return video_items
 
         for v in response["hits"]:
-            # duration 在不同响应里可能是 number(11.625) 或 string("10.500000")
+            # duration в разных ответах бывает числом (11.625) или строкой ("10.500000")
             try:
                 duration = int(float(v.get("duration") or 0))
             except (TypeError, ValueError):
@@ -605,39 +627,43 @@ def search_videos_coverr(
     return []
 
 
-# WaveSpeed AI (https://wavespeed.ai) 通过文生视频模型按脚本关键词直接生成素材，
-# 与三个库存素材源共用 MaterialInfo 结果结构和后续下载、剪辑流程。
+# WaveSpeed AI (https://wavespeed.ai) генерирует материалы напрямую по ключевым
+# словам сценария моделью «текст в видео» и разделяет с тремя стоковыми источниками структуру результата MaterialInfo, а также дальнейшие загрузку и монтаж.
 WAVESPEED_API_BASE_URL = "https://api.wavespeed.ai/api/v3"
 WAVESPEED_DEFAULT_T2V_MODEL = "bytedance/seedance-2.0-fast/text-to-video"
 WAVESPEED_POLL_INTERVAL_SECONDS = 2.0
 WAVESPEED_RUN_TIMEOUT_SECONDS = 600.0
-# 默认模型 bytedance/seedance-2.0-fast/text-to-video 只接受 4-15 秒；超出
-# 范围的请求会被 API 直接拒绝。WebUI 默认片段时长是 3 秒，因此必须在提交
-# 前收敛到模型支持区间，多出的时长由现有剪辑流程按片段时长裁掉。
+# Модель по умолчанию bytedance/seedance-2.0-fast/text-to-video принимает только
+# 4–15 секунд; запрос вне диапазона API отклонит сразу. В WebUI длительность
+# фрагмента по умолчанию 3 секунды, поэтому перед отправкой значение приводится
+# к поддерживаемому моделью диапазону, а лишнее обрежет существующий монтаж по длительности фрагмента.
 WAVESPEED_MIN_DURATION_SECONDS = 4
 WAVESPEED_MAX_DURATION_SECONDS = 15
-# 三个失败态语义不同（模型报错 / 用户取消 / 平台超时），但对素材流程都意味着
-# 本关键词没有产物，统一按空结果处理，交给上层跳过该片段继续生成。
+# У трёх состояний отказа разный смысл (ошибка модели, отмена пользователем,
+# таймаут платформы), но для процесса материалов все они означают отсутствие результата по этому ключевому слову; обрабатываем их единообразно как пустой результат, а верхний слой пропускает фрагмент и продолжает генерацию.
 WAVESPEED_FAILURE_STATUSES = frozenset({"failed", "cancelled", "timeout"})
-# 与 WaveSpeed 官方 Python SDK / n8n 节点保持同一口径：429 与 5xx 属于临时
-# 故障，值得有限次退避重试；4xx 是明确的客户端错误，快速失败。
+# Придерживаемся той же трактовки, что официальный Python SDK WaveSpeed и узел
+# n8n: 429 и 5xx — временные сбои, которые стоит повторить с ограниченным числом попыток; 4xx — однозначная ошибка клиента, падаем быстро.
 WAVESPEED_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
-# 单次轮询允许的连续临时失败次数。一次不走运的 GET 不能让已经计费的任务失联。
+# Сколько подряд идущих временных сбоев допускается за один цикл опроса. Одна неудачная GET не должна оборвать связь с уже оплаченной задачей.
 WAVESPEED_MAX_POLL_RETRIES = 5
-# 线性退避基数，第 n 次重试等待 base * n 秒。
+# База линейного отката: n-я повторная попытка ждёт base * n секунд.
 WAVESPEED_RETRY_BASE_SECONDS = 1.0
-# 产物下载失败时对同一个签名地址的重试次数。素材已经付费生成，优先重试原
-# 地址，不能因为一次下载抖动就重新提交一次付费生成任务。
+# Число повторов по тому же подписанному адресу при неудачной загрузке результата.
+# Материал уже сгенерирован за деньги, поэтому сперва повторяем по исходному адресу и не отправляем новую платную задачу генерации из-за единичного сбоя загрузки.
 WAVESPEED_MAX_DOWNLOAD_RETRIES = 2
 
 
 class WaveSpeedUnconfirmedTaskError(RuntimeError):
     """
-    付费生成任务已提交，但最终状态无法在本地确认。
+    Платная задача генерации отправлена, но её итоговый статус локально
+    подтвердить не удалось.
 
-    这类异常绝不等价于“该任务失败、可以重来”：远端任务可能仍在运行或已经
-    完成并计费。素材流程必须就此停止，不再为后续关键词提交新的付费任务，
-    并把已提交的 prediction id 留在日志中供人工找回。
+    Такое исключение ни в коем случае не равнозначно «задача упала, можно
+    повторить»: удалённая задача может всё ещё выполняться либо уже завершиться и
+    быть оплаченной. Процесс материалов обязан остановиться здесь и не отправлять
+    новые платные задачи по следующим ключевым словам, оставив в логе id уже
+    отправленного prediction для ручного поиска результата.
     """
 
     def __init__(self, message: str, prediction_id: str = ""):
@@ -646,7 +672,7 @@ class WaveSpeedUnconfirmedTaskError(RuntimeError):
 
 
 def _wavespeed_status_code(response: Any) -> int:
-    """读取响应状态码；测试替身或异常对象缺少该字段时按 200 处理。"""
+    """Читает код статуса ответа; если у тестового дублёра или объекта исключения такого поля нет, считаем его равным 200."""
     try:
         return int(getattr(response, "status_code", 200))
     except (TypeError, ValueError):
@@ -655,10 +681,11 @@ def _wavespeed_status_code(response: Any) -> int:
 
 def _is_wavespeed_retryable_error(error: Exception) -> bool:
     """
-    判断轮询异常是否值得重试。
+    Определяет, стоит ли повторять неудачный опрос.
 
-    连接、超时一类网络异常没有状态码，按临时故障处理；带状态码的响应只在
-    429 和 5xx 时重试，与官方 SDK 的重试集合保持一致。
+    У сетевых исключений вроде обрыва соединения и таймаута кода статуса нет — их
+    считаем временными сбоями; ответы с кодом повторяются только при 429 и 5xx,
+    как и в наборе повторов официального SDK.
     """
     if isinstance(
         error,
@@ -677,11 +704,14 @@ def _is_wavespeed_retryable_error(error: Exception) -> bool:
 
 def _wavespeed_duration_bounds() -> tuple[int, int]:
     """
-    返回当前模型支持的生成时长区间（秒）。
+    Возвращает диапазон длительности генерации, поддерживаемый текущей моделью
+    (в секундах).
 
-    默认区间对应默认 Seedance 模型；用户切换到其它文生视频模型时，可以在
-    配置中同步调整区间。任何异常配置都退回默认值，并保证 min <= max，
-    避免把用户输入变成必然失败的远端请求。
+    Диапазон по умолчанию соответствует модели Seedance по умолчанию; при
+    переключении на другую модель «текст в видео» диапазон можно синхронно
+    поправить в конфигурации. Любая некорректная настройка откатывается к
+    значениям по умолчанию, и гарантируется min <= max — иначе пользовательский
+    ввод превратился бы в заведомо провальный запрос к удалённому сервису.
     """
 
     def read_bound(key: str, fallback: int) -> int:
@@ -702,11 +732,14 @@ def generate_videos_wavespeed(
     video_aspect: VideoAspect = VideoAspect.portrait,
 ) -> List[MaterialInfo]:
     """
-    用 WaveSpeed 文生视频模型为一个脚本关键词生成一段素材。
+    Генерирует один фрагмент материала под ключевое слово сценария моделью
+    «текст в видео» от WaveSpeed.
 
-    与库存素材源的 search_videos_* 保持同一签名和空列表失败约定，
-    使其可以直接接入 ``download_videos`` 的通用下载与时长核算流程。
-    ``minimum_duration`` 在生成语境下就是目标片段时长（秒）。
+    Сохраняет ту же сигнатуру и то же соглашение «пустой список означает
+    неудачу», что и search_videos_* у стоковых источников, поэтому напрямую
+    встраивается в общий процесс загрузки и подсчёта длительности в
+    ``download_videos``. В контексте генерации ``minimum_duration`` — это целевая
+    длительность фрагмента в секундах.
     """
     aspect = VideoAspect(video_aspect)
     video_width, video_height = aspect.to_resolution()
@@ -724,8 +757,8 @@ def generate_videos_wavespeed(
     min_duration, max_duration = _wavespeed_duration_bounds()
     duration = min(max(requested_duration, min_duration), max_duration)
     if duration != requested_duration:
-        # 生成比请求更长不会影响成片：剪辑流程仍按片段时长裁剪；生成比请求
-        # 更短的情况只发生在请求超过模型上限时，此时也只能收敛到上限。
+        # Сгенерировать длиннее, чем запрошено, не мешает готовому ролику: монтаж всё
+        # равно обрежет по длительности фрагмента. Короче запрошенного получается только когда запрос превышает верхнюю границу модели, и тогда остаётся лишь свести его к этой границе.
         logger.info(
             f"wavespeed clip duration clamped to model-supported range: "
             f"requested={requested_duration}s, using={duration}s "
@@ -741,8 +774,8 @@ def generate_videos_wavespeed(
         f"term={search_term!r}, duration={duration}s"
     )
 
-    # 提交 POST 绝不自动重试：请求可能已经在远端创建了付费任务，重发会造成
-    # 重复生成和重复扣费（与官方 SDK 的 submission 策略一致）。
+    # POST-отправка никогда не повторяется автоматически: запрос мог уже создать
+    # платную задачу на удалённой стороне, и повтор привёл бы к повторной генерации и повторному списанию (это совпадает со стратегией submission в официальном SDK).
     try:
         submit_response = requests.post(
             f"{WAVESPEED_API_BASE_URL}/{model_id}",
@@ -753,8 +786,8 @@ def generate_videos_wavespeed(
             timeout=(30, 60),
         )
     except Exception as e:
-        # 没有收到响应并不代表任务没有创建。此时状态不明，必须终止整个生成
-        # 流程，而不是继续为下一个关键词提交新的付费任务。
+        # Отсутствие ответа не означает, что задача не создана. Статус неизвестен, и
+        # весь процесс генерации нужно прервать, а не отправлять новую платную задачу по следующему ключевому слову.
         raise WaveSpeedUnconfirmedTaskError(
             "wavespeed submission did not return a response, the task may "
             "already exist remotely: "
@@ -763,7 +796,7 @@ def generate_videos_wavespeed(
 
     submit_status = _wavespeed_status_code(submit_response)
     if submit_status >= 500:
-        # 5xx 可能发生在任务创建之后，无法判断是否已经计费。
+        # 5xx может прийти уже после создания задачи, и понять, начислена ли плата, невозможно.
         raise WaveSpeedUnconfirmedTaskError(
             f"wavespeed submission failed with HTTP {submit_status}, "
             "the task may already exist remotely"
@@ -778,8 +811,8 @@ def generate_videos_wavespeed(
 
     submit_data = submit_body.get("data") if isinstance(submit_body, dict) else None
     if not isinstance(submit_body, dict) or submit_body.get("code") != 200:
-        # 4xx 与业务错误码是明确的拒绝，远端没有创建任务，也就不存在重复
-        # 计费风险，按现有素材源约定返回空结果并继续。
+        # 4xx и бизнес-коды ошибок — однозначный отказ: задача на удалённой стороне не
+        # создана, риска повторной оплаты нет, поэтому по принятому у источников материалов соглашению возвращаем пустой результат и продолжаем.
         logger.error(
             "wavespeed video generation request rejected: "
             f"http_status={submit_status}, "
@@ -791,12 +824,12 @@ def generate_videos_wavespeed(
         str(submit_data.get("id") or "") if isinstance(submit_data, dict) else ""
     )
     if not prediction_id:
-        # 提交被接受但没拿到 ID：任务可能已经存在却无法追踪，不能继续下单。
+        # Отправку приняли, но ID не вернули: задача может существовать, а отследить её нельзя — новые заказы отправлять нельзя.
         raise WaveSpeedUnconfirmedTaskError(
             "wavespeed accepted the submission without returning a prediction id"
         )
-    # 生成任务提交成功即产生远端计费副作用，先落日志记录任务 ID，
-    # 即使后续轮询失败，用户仍能凭 ID 在 WaveSpeed 控制台找回产物。
+    # Успешная отправка задачи генерации сразу создаёт платный побочный эффект на
+    # удалённой стороне, поэтому сперва пишем ID задачи в лог: даже если опрос затем сорвётся, пользователь сможет найти результат в консоли WaveSpeed по этому ID.
     logger.info(f"wavespeed prediction created: id={prediction_id}")
 
     result_data = _wait_for_wavespeed_prediction(
@@ -811,8 +844,8 @@ def generate_videos_wavespeed(
         video_items = []
         outputs = result_data.get("outputs")
         for output in outputs if isinstance(outputs, list) else []:
-            # 产物 URL 是带签名的临时下载地址，必须整体保留（不能剥离查询参
-            # 数），因此不写入 source_info，只用于随后的立即下载。
+            # URL результата — подписанный временный адрес скачивания, и сохранять его нужно
+            # целиком (параметры запроса убирать нельзя), поэтому в source_info он не пишется и используется только для немедленной загрузки следом.
             if not isinstance(output, str) or not output.startswith(
                 ("http://", "https://")
             ):
@@ -839,8 +872,8 @@ def generate_videos_wavespeed(
             )
         return video_items
     except Exception as e:
-        # 产物已经生成并计费，这里的异常只可能来自本地解析。记录后按空结果
-        # 返回，让上层跳过该片段，但任务状态本身是确定的，可以继续后续片段。
+        # Результат уже сгенерирован и оплачен, поэтому исключение здесь может прийти
+        # только от локального разбора. Записываем его и возвращаем пустой результат, чтобы верхний слой пропустил фрагмент; статус самой задачи при этом определён, и последующие фрагменты можно продолжать.
         logger.error(
             "wavespeed output parsing failed: "
             f"id={prediction_id}, error={type(e).__name__}, "
@@ -857,12 +890,16 @@ def _wait_for_wavespeed_prediction(
     api_key: str,
 ) -> dict | None:
     """
-    轮询同一个 prediction id 直到出现确定结果。
+    Опрашивает один и тот же prediction id, пока не появится определённый
+    результат.
 
-    返回 ``completed`` 的 data；远端明确失败（failed / cancelled / timeout）
-    时返回 None，表示该任务已经结束、可以安全地继续后续片段。临时故障按
-    线性退避重试同一个 ID，绝不重新提交任务；状态始终无法确认时抛出
-    :class:`WaveSpeedUnconfirmedTaskError`，由调用方终止整个生成流程。
+    Возвращает data при ``completed``; при явной неудаче на удалённой стороне
+    (failed, cancelled, timeout) возвращает None — это значит, что задача
+    завершена и к следующим фрагментам можно переходить безопасно. Временные сбои
+    повторяются по тому же ID с линейным откатом, новая задача не отправляется
+    никогда. Если статус так и не удаётся подтвердить, бросается
+    :class:`WaveSpeedUnconfirmedTaskError`, и вызывающая сторона прерывает весь
+    процесс генерации.
     """
     deadline = time.monotonic() + WAVESPEED_RUN_TIMEOUT_SECONDS
     consecutive_failures = 0
@@ -885,8 +922,8 @@ def _wait_for_wavespeed_prediction(
                 result_body.get("data") if isinstance(result_body, dict) else None
             )
             if not isinstance(result_body, dict) or result_body.get("code") != 200:
-                # 轮询被明确拒绝（如 4xx）时任务状态仍然未知：任务已经提交，
-                # 只是本地查不到结果，同样不能继续提交新的付费任务。
+                # Когда опрос явно отклонён (например, 4xx), статус задачи всё равно неизвестен:
+                # задача отправлена, просто локально результат не виден, и отправлять новые платные задачи по-прежнему нельзя.
                 raise WaveSpeedUnconfirmedTaskError(
                     "wavespeed prediction status is unknown: "
                     f"http_status={status_code}, "
@@ -929,7 +966,7 @@ def _wait_for_wavespeed_prediction(
             time.sleep(delay)
             continue
 
-        # 拿到一次有效响应就重置计数，只有连续失败才消耗重试额度。
+        # Один удачный ответ сбрасывает счётчик: лимит повторов расходуют только подряд идущие сбои.
         consecutive_failures = 0
         status = str(result_data.get("status") or "")
         if status == "completed":
@@ -942,7 +979,7 @@ def _wait_for_wavespeed_prediction(
             )
             return None
         if time.monotonic() > deadline:
-            # 远端任务仍在执行，本地无法确认最终状态，必须停止继续下单。
+            # Удалённая задача всё ещё выполняется, локально итоговый статус не подтвердить — новые заказы нужно прекратить.
             raise WaveSpeedUnconfirmedTaskError(
                 f"wavespeed prediction is still {status or 'pending'} after "
                 f"{WAVESPEED_RUN_TIMEOUT_SECONDS:.0f}s of local waiting",
@@ -955,10 +992,12 @@ def _save_generated_video_with_retry(
     video_url: str, save_dir: str, provider: str
 ) -> str:
     """
-    下载已经付费生成的产物，失败时优先重试同一个地址。
+    Скачивает уже оплаченный результат генерации, при неудаче повторяя попытку по
+    тому же адресу.
 
-    重新生成一次远端任务的代价是再付一次费，所以下载抖动必须先在原地址上
-    做有限次退避重试，重试耗尽才放弃该片段。
+    Повторная генерация удалённой задачи стоит ещё одной оплаты, поэтому сбой
+    загрузки сперва отрабатывается ограниченным числом повторов с откатом по
+    исходному адресу, и только исчерпав их, фрагмент отбрасывается.
     """
     for attempt in range(WAVESPEED_MAX_DOWNLOAD_RETRIES + 1):
         try:
@@ -1057,11 +1096,15 @@ def _search_videos_with_cache(
     video_aspect: VideoAspect,
 ) -> List[MaterialInfo]:
     """
-    统一处理三个在线素材源的 24 小时搜索缓存。
+    Единообразно обслуживает 24-часовой кэш поиска для трёх онлайн-источников
+    материалов.
 
-    缓存只包裹搜索 API，不改变后续视频下载与去重逻辑。远端返回空列表时不写
-    缓存，因为现有 provider 接口使用空列表同时表示“没有结果”和“请求失败”；
-    在两者尚未拆分为明确结果类型前，宁可下次重试，也不能把临时故障缓存一天。
+    Кэш оборачивает только API поиска и не меняет последующие загрузку видео и
+    отсев дубликатов. Пустой ответ удалённой стороны не кэшируется, потому что в
+    нынешнем интерфейсе провайдеров пустой список означает одновременно «нет
+    результатов» и «запрос не удался»; пока эти два случая не разделены явными
+    типами результата, лучше повторить в следующий раз, чем закэшировать временный
+    сбой на сутки.
     """
     cache_args = {
         "provider": provider,
@@ -1074,8 +1117,8 @@ def _search_videos_with_cache(
         try:
             return material_cache.load_material_search_cache(**cache_args)
         except Exception as exc:
-            # 缓存是可选优化，任何缓存实现异常都必须按未命中处理，不能阻断
-            # Pexels、Pixabay 或 Coverr 的正常远端搜索。
+            # Кэш — необязательная оптимизация, поэтому любое исключение в его реализации
+            # обрабатывается как промах и не должно прерывать обычный удалённый поиск в Pexels, Pixabay или Coverr.
             logger.warning(
                 "material search cache read failed, continue with remote search: "
                 f"provider={provider}, error={type(exc).__name__}, detail={exc}"
@@ -1093,8 +1136,8 @@ def _search_videos_with_cache(
         )
         ignored_count = len(cached_items) - len(filtered_cached_items)
         if ignored_count:
-            # 旧版本缓存可能混入其它方向的素材。即使仍有少量可用条目，也要刷新
-            # 完整候选集，否则在缓存有效期内会反复使用同一批少量视频。
+            # В кэше от прежних версий могли смешаться материалы другой ориентации. Даже
+            # если пригодные записи ещё остались, набор кандидатов нужно обновить целиком: иначе в течение срока жизни кэша будет повторно использоваться одна и та же горстка видео.
             return None, ignored_count
         return filtered_cached_items, 0
 
@@ -1110,8 +1153,8 @@ def _search_videos_with_cache(
 
     cache_lock = material_cache.get_material_search_cache_lock(**cache_args)
     with cache_lock:
-        # 等待相同搜索条件的线程完成后再次读取，避免多个 API 任务在首次缓存
-        # 未命中时同时请求远端，降低第三方接口限流和风控触发概率。
+        # Дожидаемся потока с такими же условиями поиска и читаем ещё раз, чтобы при
+        # первом промахе кэша несколько задач API не пошли к удалённому сервису одновременно: так ниже вероятность упереться в лимиты и защиту стороннего эндпоинта.
         cached_items, _ = load_matching_cache()
         if cached_items is not None:
             return cached_items
@@ -1121,9 +1164,9 @@ def _search_videos_with_cache(
             minimum_duration=minimum_duration,
             video_aspect=video_aspect,
         )
-        # Provider 正常会写入当前关键词，但测试替身、第三方扩展或旧实现可能
-        # 遗漏或携带错误值。缓存读取会根据缓存键恢复该字段，因此远端结果也在
-        # 同一入口校正，保证首次搜索与缓存命中的任务来源记录保持一致。
+        # Провайдер обычно записывает текущее ключевое слово, но тестовый дублёр,
+        # стороннее расширение или старая реализация могут его пропустить или подставить
+        # неверное значение. При чтении из кэша поле восстанавливается по ключу кэша, поэтому и удалённый результат правится в той же точке — так записи об источнике совпадают и при первом поиске, и при попадании в кэш.
         for item in items:
             if isinstance(item.source_info, dict):
                 item.source_info = dict(item.source_info)
@@ -1181,10 +1224,13 @@ def download_videos(
         material_directory = ""
 
     if source == "wavespeed":
-        # AI 生成按条计费，不能沿用库存源"先为全部关键词取回候选、再挑选"
-        # 的流程，否则会为用不到的片段付费。生成源改为逐段按需生成，凑够
-        # 所需时长立即停止；也不参与 24 小时搜索缓存——产物 URL 是会过期
-        # 的签名地址，且复用缓存会让不同任务反复得到同一段生成视频。
+        # ИИ-генерация тарифицируется поштучно, поэтому принятый у стоковых источников
+        # порядок «сперва набрать кандидатов по всем ключевым словам, потом выбрать» не
+        # годится: мы платили бы за неиспользуемые фрагменты. Генерирующий источник
+        # создаёт фрагменты по мере надобности и останавливается, набрав нужную
+        # длительность; в 24-часовом кэше поиска он не участвует — URL результата
+        # подписанный и истекает, а переиспользование кэша давало бы разным задачам одно
+        # и то же сгенерированное видео.
         return _download_videos_wavespeed_on_demand(
             task_id=task_id,
             search_terms=search_terms,
@@ -1194,8 +1240,8 @@ def download_videos(
             material_directory=material_directory,
         )
     if source == "volcengine_seedance":
-        # 与 WaveSpeed 相同，方舟官方接口会创建异步付费任务。必须按需逐段
-        # 生成，只购买当前配音时长真正需要的素材。
+        # Как и WaveSpeed, официальный эндпоинт Ark создаёт асинхронную платную задачу.
+        # Генерировать нужно фрагмент за фрагментом по мере надобности, покупая только те материалы, которых действительно требует текущая длительность озвучки.
         return _download_videos_seedance_on_demand(
             task_id=task_id,
             search_terms=search_terms,
@@ -1262,8 +1308,8 @@ def download_videos(
                         _material_source_record(item, saved_video_path)
                     )
                 except Exception as source_error:
-                    # 来源记录异常不能把已经成功下载的素材视为下载失败，更不能
-                    # 阻断视频生成；保留供应商和异常类型用于后续定位。
+                    # Сбой записи об источнике не вправе считать уже успешно скачанный материал
+                    # неудачной загрузкой и тем более прерывать генерацию видео; поставщика и тип исключения сохраняем для дальнейшего разбора.
                     logger.warning(
                         "failed to prepare material source record: "
                         f"provider={item.provider}, "
@@ -1297,12 +1343,17 @@ def _download_videos_wavespeed_on_demand(
     material_directory: str,
 ) -> List[str]:
     """
-    按脚本片段顺序逐段生成 WaveSpeed 素材，凑够所需总时长立即停止。
+    Генерирует материалы WaveSpeed фрагмент за фрагментом в порядке частей
+    сценария и останавливается, набрав нужную суммарную длительность.
 
-    每个关键词天然对应一个脚本片段，生成即付费：先全量生成再挑选会为
-    用不到的片段付费。这里每生成一段就立刻下载并累计有效时长（与库存
-    流程一致，按片段时长封顶），累计超过所需配音时长后不再触发新的生成
-    请求。单段失败按现有素材源约定跳过并继续下一段。
+    Каждому ключевому слову естественным образом соответствует свой фрагмент
+    сценария, а генерация означает оплату: сгенерировать всё, а потом выбрать —
+    значит заплатить за неиспользуемые фрагменты. Здесь каждый сгенерированный
+    фрагмент сразу скачивается, и накапливается полезная длительность (как и в
+    стоковом процессе, с потолком по длительности фрагмента); превысив нужную
+    длительность озвучки, новые запросы генерации больше не отправляются. Сбой
+    одного фрагмента по принятому у источников материалов соглашению
+    пропускается, и работа продолжается со следующего.
     """
     video_paths: List[str] = []
     material_sources: list[dict[str, Any]] = []
@@ -1315,9 +1366,9 @@ def _download_videos_wavespeed_on_demand(
                 video_aspect=video_aspect,
             )
         except WaveSpeedUnconfirmedTaskError as e:
-            # 已提交的付费任务状态不明：远端可能仍在运行或已经完成并计费。
-            # 继续为后续关键词下单会造成重复生成和重复扣费，因此就地停止，
-            # 并把 prediction id 留在日志里供人工在控制台找回产物。
+            # Статус уже отправленной платной задачи неизвестен: на удалённой стороне она
+            # может всё ещё выполняться или уже завершиться и быть оплаченной. Продолжать
+            # заказывать по следующим ключевым словам — значит получить повторную генерацию и повторное списание, поэтому останавливаемся здесь и оставляем prediction id в логе, чтобы результат можно было вручную найти в консоли.
             logger.error(
                 "stop submitting new wavespeed tasks, the last submitted task "
                 f"is unconfirmed: prediction_id={e.prediction_id or 'unknown'}, "
@@ -1335,16 +1386,16 @@ def _download_videos_wavespeed_on_demand(
             try:
                 material_sources.append(_material_source_record(item, saved_video_path))
             except Exception as source_error:
-                # 与库存源一致：来源记录异常不能把已经付费生成并成功下载的
-                # 素材当作失败，更不能阻断视频生成。
+                # Как и у стоковых источников: сбой записи об источнике не вправе считать
+                # оплаченный и успешно скачанный материал неудачей и тем более прерывать генерацию видео.
                 logger.warning(
                     "failed to prepare material source record: "
                     f"provider={item.provider}, "
                     f"error={type(source_error).__name__}, detail={source_error}"
                 )
             total_duration += min(max_clip_duration, item.duration)
-            # 用 >= 判断:累计时长恰好等于所需时长时已经够用,再生成会
-            # 多付一次费用。内外两处判断必须保持同一语义。
+            # Сравниваем через >=: когда накопленная длительность ровно равна нужной, её уже
+            # достаточно, и следующая генерация была бы лишней оплатой. Обе проверки, внутренняя и внешняя, обязаны иметь одинаковый смысл.
             if total_duration >= audio_duration:
                 break
         if total_duration >= audio_duration:
@@ -1368,13 +1419,14 @@ def _download_videos_seedance_on_demand(
     max_clip_duration: int,
     material_directory: str,
 ) -> List[str]:
-    """顺序生成方舟 Seedance 素材，覆盖配音时长后立即停止付费下单。"""
+    """Последовательно генерирует материалы Ark Seedance и прекращает платные заказы, как только покрыта длительность озвучки."""
     video_paths: List[str] = []
     material_sources: list[dict[str, Any]] = []
 
-    # 付费生成循环必须先验证控制循环次数的两个时长。NaN/Infinity 会让
-    # ``total_duration >= audio_duration`` 永远不成立，而非正片段时长会让
-    # 累计值无法增长，两者都可能为全部关键词创建无用的付费任务。
+    # Цикл платной генерации обязан сперва проверить обе длительности, которые
+    # управляют числом итераций. Из-за NaN и Infinity условие
+    # ``total_duration >= audio_duration`` никогда не выполнится, а неположительная
+    # длительность фрагмента не даст накопленному значению расти — и то и другое может создать бесполезные платные задачи по всем ключевым словам.
     try:
         required_duration = float(audio_duration)
     except (TypeError, ValueError) as exc:
@@ -1413,8 +1465,8 @@ def _download_videos_seedance_on_demand(
                 video_aspect=video_aspect,
             )
         except volcengine_seedance.VolcEngineSeedanceUnconfirmedTaskError as exc:
-            # 远端付费任务仍可能成功。立即停止继续下单，并保留任务 ID，方便
-            # 用户随后在方舟控制台确认或找回结果。
+            # Удалённая платная задача всё ещё может завершиться успешно. Немедленно
+            # прекращаем заказы и сохраняем ID задачи, чтобы пользователь мог затем подтвердить или найти результат в консоли Ark.
             logger.error(
                 "stop submitting new Seedance tasks because the last paid task "
                 f"is unconfirmed: task_id={exc.task_id or 'unknown'}, detail={exc}"
@@ -1431,9 +1483,9 @@ def _download_videos_seedance_on_demand(
                 item.url, material_directory, "volcengine_seedance"
             )
             if not saved_video_path:
-                # 远端任务已完成并产生费用，本地下载失败时必须把远端任务 ID
-                # 带回任务状态，便于用户去方舟控制台找回结果。这里直接抛出
-                # 专用错误，同时阻止后续关键词继续创建新的付费任务。
+                # Удалённая задача завершена и оплачена, поэтому при неудачной локальной
+                # загрузке ID удалённой задачи обязан вернуться в статус задачи — так пользователь найдёт результат в консоли Ark. Бросаем специальную ошибку прямо здесь,
+                # заодно не давая следующим ключевым словам создавать новые платные задачи.
                 source_info = (
                     item.source_info if isinstance(item.source_info, dict) else {}
                 )
@@ -1482,13 +1534,15 @@ def _download_videos_by_script_order(
     material_directory: str,
 ) -> List[str]:
     """
-    按脚本文案顺序下载素材。
+    Скачивает материалы в порядке текста сценария.
 
-    默认下载逻辑会把所有关键词的候选素材合并成一个大列表；如果第一个
-    关键词返回很多结果，最终下载时可能一直消耗这个关键词的素材，后续
-    脚本主题就排不上时间线。这里按关键词分组后轮询下载：
-    第 1 轮取每个关键词的第 1 个候选，第 2 轮取每个关键词的第 2 个候选。
-    这样在不重写视频合成引擎的前提下，尽量保证素材顺序贴近文案顺序。
+    Логика загрузки по умолчанию сливает кандидатов по всем ключевым словам в один
+    большой список; если первое ключевое слово вернуло много результатов, при
+    загрузке можно так и остаться на его материалах, и последующие темы сценария
+    не попадут на таймлайн. Здесь кандидаты группируются по ключевым словам и
+    скачиваются по кругу: на первом круге берётся первый кандидат каждого слова,
+    на втором — второй. Так, не переписывая движок сборки видео, порядок
+    материалов держится как можно ближе к порядку текста.
     """
     logger.info("downloading videos with script-order material matching")
     candidate_groups = []
