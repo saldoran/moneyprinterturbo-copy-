@@ -4,21 +4,24 @@ FROM python:3.11-slim-bullseye
 # Set the working directory in the container
 WORKDIR /MoneyPrinterTurbo
 
-# 设置/MoneyPrinterTurbo目录权限为777
+# Выставляем права 777 на каталог /MoneyPrinterTurbo
 RUN chmod 777 /MoneyPrinterTurbo
 
 ENV PYTHONPATH="/MoneyPrinterTurbo"
 
-# 本地用户默认继续优先使用国内镜像；GitHub Actions 发布 GHCR 镜像时使用 default，
-# 避免海外 runner 访问国内镜像过慢导致镜像发布长时间卡住。
+# Локальные пользователи по умолчанию продолжают отдавать приоритет китайским зеркалам;
+# при публикации образа в GHCR из GitHub Actions используется default, чтобы зарубежный
+# runner не завис надолго из-за медленного доступа к китайским зеркалам.
 ARG DOCKER_BUILD_MIRROR=china
 ARG PIP_USE_OFFICIAL=0
 
-# 系统依赖安装需要同时满足两点：国内环境保留镜像回退能力，所有镜像均
-# 失败时必须让 Docker 构建立刻失败。旧循环最后执行的 sleep 总会返回 0，
-# 导致 git/ffmpeg 未安装时仍生成不可用镜像。这里把“写入软件源”“安装”
-# 和“三次重试”拆成边界清晰的 shell 函数，并用函数返回值决定是否继续。
-# 所有软件源统一使用 HTTPS，避免部分网络环境直接拦截明文 HTTP 请求。
+# Установка системных зависимостей обязана удовлетворять двум условиям: в китайском
+# окружении сохраняется откат по зеркалам, а если отказали все зеркала, сборка Docker
+# должна упасть немедленно. В прежнем цикле последним выполнялся sleep, всегда
+# возвращавший 0, из-за чего без git и ffmpeg всё равно получался нерабочий образ.
+# Здесь «запись источников», «установка» и «три повтора» разнесены в shell-функции с
+# чёткими границами, и продолжать ли работу, решает код возврата функции.
+# Все источники используют HTTPS: часть сетевых окружений напрямую блокирует открытый HTTP.
 RUN set -u; \
     write_debian_sources() { \
         main_url="$1"; \
@@ -82,7 +85,7 @@ RUN set -u; \
 # Copy only the requirements.txt first to leverage Docker cache
 COPY requirements.txt ./
 
-# 本地默认优先国内 PyPI 镜像；GHCR 发布使用官方 PyPI，避免海外 runner 因跨境镜像访问变慢。
+# Локально приоритет у китайских зеркал PyPI; при публикации в GHCR используется официальный PyPI, чтобы зарубежный runner не тормозил на трансграничном доступе к зеркалу.
 RUN if [ "$PIP_USE_OFFICIAL" = "1" ]; then \
         pip install --no-cache-dir --retries 3 --timeout 60 -r requirements.txt; \
     else \
@@ -97,8 +100,9 @@ COPY . .
 # Expose the port the app runs on
 EXPOSE 8501
 
-# 容器内部必须监听 0.0.0.0，宿主机仍通过 docker 端口映射限制为 127.0.0.1。
-# browser.serverAddress 只决定浏览器展示的访问地址，不能替代 server.address。
+# Внутри контейнера обязательно слушаем 0.0.0.0, а на хосте доступ по-прежнему ограничен
+# пробросом порта Docker на 127.0.0.1. browser.serverAddress задаёт лишь адрес, который
+# показывает браузер, и server.address не заменяет.
 CMD ["streamlit", "run", "./webui/Main.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.serverAddress=127.0.0.1", "--server.enableCORS=True", "--browser.gatherUsageStats=False", "--client.toolbarMode=minimal", "--logger.hideWelcomeMessage=True", "--server.showEmailPrompt=False"]
 
 # 1. Build the Docker image using the following command

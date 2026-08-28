@@ -3,7 +3,7 @@
 # credentials in config.toml; do not commit your local config.toml.
 
 # =============================================================================
-# API Service / API 服务
+# API Service / Сервис API
 # =============================================================================
 # Log level: DEBUG, INFO, WARNING, or ERROR.
 log_level = "DEBUG"
@@ -17,20 +17,22 @@ listen_port = 8080
 # Leave empty for local backward-compatible access. When configured, clients
 # must send the same value in the x-api-key request header. Keep real keys only
 # in config.toml and never commit them.
-# API 路由和 /tasks 生成文件的可选保护。留空时保持本地免认证行为；
-# 配置后客户端必须通过 x-api-key 请求头传入同一个值。
+# Опциональная защита маршрутов API и файлов, создаваемых в /tasks. Пустое значение
+# сохраняет локальный режим без аутентификации; после настройки клиент обязан
+# передавать то же значение в заголовке x-api-key.
 # Task artifact requests also require this header; a browser address bar cannot
 # attach custom headers, so authenticated clients should download them via HTTP.
-# 任务产物下载同样需要该请求头；浏览器地址栏无法附加自定义请求头，启用鉴权后
-# 应由 API 客户端携带请求头下载。
+# Скачивание артефактов задач тоже требует этот заголовок; адресная строка браузера
+# свой заголовок добавить не может, поэтому после включения аутентификации скачивать
+# нужно API-клиентом, передающим заголовок.
 api_key = ""
 
 # -----------------------------------------------------------------------------
-# General / 通用设置
+# General / Общие настройки
 # -----------------------------------------------------------------------------
 
 # Hide the basic configuration panel in the WebUI.
-# 是否隐藏 WebUI 基础配置面板。
+# Скрывать ли панель базовых настроек WebUI.
 hide_config = false
 
 # Script generation backend. "local" keeps the existing LLM workflow.
@@ -51,15 +53,15 @@ loomloom_run_timeout_seconds = 600
 loomloom_video_run_timeout_seconds = 1800
 
 # Timeout in seconds for a single Edge TTS streaming request.
-# 单次 Edge TTS 流式请求超时时间。慢网络可适当调大，设置为 0 表示禁用超时。
+# Таймаут одного потокового запроса к Edge TTS. На медленной сети можно увеличить; 0 отключает таймаут.
 edge_tts_timeout = 30
 
 # Verify TLS certificates for external APIs and material downloads.
-# 默认应保持开启；仅在可信代理或自签名证书环境中临时关闭。
+# По умолчанию должно оставаться включённым; временно отключать стоит лишь в окружении с доверенным прокси или самоподписанным сертификатом.
 tls_verify = true
 
 # -----------------------------------------------------------------------------
-# Video Materials / 视频素材
+# Video Materials / Видеоматериалы
 # -----------------------------------------------------------------------------
 
 # Available values: "pexels", "pixabay", "coverr", "wavespeed",
@@ -72,7 +74,7 @@ video_source = "pexels"
 
 # API key lists support key rotation. Use straight ASCII double quotes and
 # separate multiple keys with commas, for example: ["key-1", "key-2"].
-# Key 必须使用英文半角双引号，多个 Key 使用英文逗号分隔。
+# Ключи указываются в прямых двойных кавычках, несколько ключей разделяются запятой.
 
 # Register at https://www.pexels.com/api/
 pexels_api_keys = []
@@ -127,7 +129,7 @@ twelvelabs_rerank_terms = false
 # twelvelabs_pegasus_model = "pegasus1.5"
 
 # Match search terms and downloaded materials to the script narrative order.
-# 默认关闭，开启后会减少随机性，使素材顺序更贴近文案结构。
+# По умолчанию выключено; включение снижает случайность и приближает порядок материалов к структуре текста.
 match_materials_to_script = false
 
 # Optional Sonilo video-matched original background music.
@@ -135,11 +137,11 @@ match_materials_to_script = false
 # this value, or you can set the SONILO_API_KEY environment variable instead.
 sonilo_api_key = ""
 sonilo_base_url = "https://api.sonilo.com"
-# 单次生成流连续无数据时的最长等待秒数；它不是整个请求的总耗时上限。
+# Максимальное ожидание в секундах, пока поток генерации подряд не отдаёт данных; это не общий лимит времени всего запроса.
 sonilo_timeout = 600
 
 # -----------------------------------------------------------------------------
-# LLM Providers / 大模型提供商
+# LLM Providers / Провайдеры больших языковых моделей
 # -----------------------------------------------------------------------------
 
 # Provider definitions, default models, and default Base URLs are maintained in
@@ -294,7 +296,7 @@ pollinations_base_url = ""
 pollinations_model_name = ""
 
 # -----------------------------------------------------------------------------
-# Speech, Subtitles, and Video / 语音、字幕与视频
+# Speech, Subtitles, and Video / Речь, субтитры и видео
 # -----------------------------------------------------------------------------
 
 # Xiaomi MiMo TTS shares mimo_api_key and mimo_base_url with the MiMo LLM.
@@ -318,7 +320,7 @@ subtitle_provider = "edge"
 # video_codec = "libx264"
 
 # -----------------------------------------------------------------------------
-# Storage and Task Runtime / 存储与任务运行
+# Storage and Task Runtime / Хранилище и выполнение задач
 # -----------------------------------------------------------------------------
 
 # Public base URL used to build generated video download links. Leave empty to
@@ -343,7 +345,7 @@ max_concurrent_tasks = 5
 max_queued_tasks = 100
 
 # -----------------------------------------------------------------------------
-# Cross-platform Publishing / 跨平台发布
+# Cross-platform Publishing / Кросспостинг
 # -----------------------------------------------------------------------------
 
 # Upload-Post can publish generated videos to TikTok, Instagram, and YouTube.
@@ -365,7 +367,7 @@ upload_post_youtube_privacy_status = "public"
 upload_post_max_pending_tasks = 10
 
 # =============================================================================
-# Whisper Subtitles / Whisper 字幕
+# Whisper Subtitles / Субтитры Whisper
 # =============================================================================
 
 [whisper]
@@ -382,7 +384,7 @@ compute_type = "int8"
 # initial_prompt = ""
 
 # =============================================================================
-# Material Request Proxy / 素材请求代理
+# Material Request Proxy / Прокси для запросов материалов
 # =============================================================================
 
 [proxy]
@@ -393,7 +395,7 @@ compute_type = "int8"
 # https = "http://127.0.0.1:1080"
 
 # =============================================================================
-# TTS Providers / 语音合成服务
+# TTS Providers / Сервисы синтеза речи
 # =============================================================================
 
 [azure]
@@ -467,7 +469,7 @@ voices = []
 # https://fish.audio/pricing for current availability and commercial terms.
 
 # =============================================================================
-# WebUI Preferences / WebUI 偏好
+# WebUI Preferences / Настройки WebUI
 # =============================================================================
 
 [ui]
@@ -475,7 +477,7 @@ voices = []
 hide_log = false
 
 # Open the task folder automatically after video generation completes.
-# 视频生成完成后是否自动打开任务目录；关闭后仍可在任务管理中手动打开。
+# Открывать ли каталог задачи автоматически после генерации; при выключении его по-прежнему можно открыть вручную в управлении задачами.
 open_task_folder_on_completion = true
 
 # The WebUI writes the remaining preferences automatically. Uncomment values
